@@ -1,0 +1,16 @@
+{
+  "name": "elt-tempvc-bot",
+  "version": "1.0.0",
+  "description": "Temporary voice channel bot with synced black & white emoji for channels and members",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^16.4.5"
+  }
+}
