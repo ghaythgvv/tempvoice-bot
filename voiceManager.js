@@ -7,6 +7,18 @@ const { refreshDashboard } = require('./dashboard');
 
 const pendingDeletions = new Set(); // channelIds with a delete check already queued
 
+// Discord's channel-name validation rejects a few things that easily slip
+// into a name built from someone's raw display name: repeated whitespace,
+// leading/trailing whitespace, and it enforces a 100-character cap. This
+// keeps the generated name inside those rules instead of finding out via a
+// failed API call.
+function sanitizeChannelName(name) {
+  return name
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100);
+}
+
 // Extra permissions the channel owner gets on their own channel, on top of
 // whatever the panel buttons already let them do — mainly so they can also
 // use Discord's own right-click menu to move/mute/deafen people in it, and
@@ -60,15 +72,31 @@ async function destroyTempChannel(guild, channel, channelId, tempData) {
 async function createTempChannel(member, guild, config) {
   const emoji = storage.getUserEmoji(member.id) || randomEmoji();
   const saved = storage.getUserSettings(member.id);
-  const baseName = (saved && saved.customName) || `${member.user.username}'s Channel`;
-  const channelName = `${emoji} ${baseName}`.slice(0, 100);
+  const baseName = (saved && saved.customName) || `${member.displayName}'s Channel`;
+  const channelName = sanitizeChannelName(`${emoji} ${baseName}`);
 
-  const channel = await guild.channels.create({
-    name: channelName,
-    type: ChannelType.GuildVoice,
-    parent: config.categoryId || null,
-    userLimit: (saved && saved.limit) || 0,
-  });
+  let channel;
+  try {
+    channel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildVoice,
+      parent: config.categoryId || null,
+      userLimit: (saved && saved.limit) || 0,
+    });
+  } catch (err) {
+    console.warn(`[tempvc] rejected name "${channelName}" (${err.message}) — retrying with a plain fallback name`);
+    try {
+      channel = await guild.channels.create({
+        name: `${emoji} Channel`.slice(0, 100),
+        type: ChannelType.GuildVoice,
+        parent: config.categoryId || null,
+        userLimit: (saved && saved.limit) || 0,
+      });
+    } catch (err2) {
+      console.error(`[tempvc] could not create a temp channel for ${member.user.tag} even with a fallback name: ${err2.message}`);
+      return;
+    }
+  }
 
   storage.setTempChannel(channel.id, {
     guildId: guild.id,
