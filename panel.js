@@ -10,7 +10,7 @@ const {
 } = require('discord.js');
 
 const storage = require('./storage');
-const { EMOJI_SET_A, EMOJI_SET_B } = require('./emojiPalette');
+const { EMOJI_PALETTE } = require('./emojiPalette');
 const { applyEmojiToMember, removeEmojiFromMember } = require('./nickname');
 const { updateOwnerPermissions, destroyTempChannel } = require('./voiceManager');
 
@@ -20,8 +20,8 @@ const EPHEMERAL = { flags: MessageFlags.Ephemeral };
 // snapshotted to the owner's saved profile and restored on their next
 // channel (see snapshotOwnerSettings / createTempChannel in voiceManager.js).
 const SAVE_CONFIRMATION =
-  '✅ Settings Saved Successfully\n' +
-  '`Lock • Unlock • Limit • Trust • Untrust`\n' +
+  '✅ Settings Saved Successfully\\n' +
+  '`Lock • Unlock • Limit • Trust • Untrust`\\n' +
   'Your settings have been saved and will automatically be restored to the recreated temporary voice channel.';
 
 // Looks up the temp channel the invoking member is currently sitting in, if any.
@@ -70,7 +70,7 @@ async function handlePanelInteraction(interaction) {
     return handleTrustSelect(interaction);
   }
   if (interaction.isStringSelectMenu()) {
-    if (interaction.customId.startsWith('tempvc:emoji-select')) return handleEmojiChange(interaction);
+    if (interaction.customId === 'tempvc:emoji-select') return handleEmojiChange(interaction);
     if (interaction.customId === 'tempvc:kick-select') return handleKickSelect(interaction);
     if (interaction.customId === 'tempvc:untrust-select') return handleUntrustSelect(interaction);
     if (interaction.customId === 'tempvc:transfer-select') return handleTransferSelect(interaction);
@@ -159,18 +159,22 @@ async function handleEmojiOpen(interaction) {
   const ownerErr = requireOwner(interaction, tempData);
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
-  const menuA = new StringSelectMenuBuilder()
-    .setCustomId('tempvc:emoji-select-a')
-    .setPlaceholder('Emoji set 1')
-    .addOptions(EMOJI_SET_A.map((e) => ({ label: e.label, value: e.emoji, emoji: e.emoji })));
-  const menuB = new StringSelectMenuBuilder()
-    .setCustomId('tempvc:emoji-select-b')
-    .setPlaceholder('Emoji set 2')
-    .addOptions(EMOJI_SET_B.map((e) => ({ label: e.label, value: e.emoji, emoji: e.emoji })));
+  // Discord limits a select menu to 25 options. If EMOJI_PALETTE ever exceeds
+  // 25, we'd need to split into multiple rows. For now it's all in one menu.
+  const emojiOptions = EMOJI_PALETTE.map((e) => ({
+    label: e.label,
+    value: e.emoji,
+    emoji: e.emoji,
+  })).slice(0, 25);
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('tempvc:emoji-select')
+    .setPlaceholder('Choose an emoji')
+    .addOptions(emojiOptions);
 
   await interaction.reply({
     content: "Choose a new emoji — it'll update the channel and everyone in it:",
-    components: [new ActionRowBuilder().addComponents(menuA), new ActionRowBuilder().addComponents(menuB)],
+    components: [new ActionRowBuilder().addComponents(menu)],
     ...EPHEMERAL,
   });
 }
@@ -337,3 +341,4 @@ async function handleDelete(interaction) {
 }
 
 module.exports = { handlePanelInteraction };
+
