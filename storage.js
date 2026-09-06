@@ -34,8 +34,13 @@ function load(file) {
 }
 
 function save(file, data) {
-  ensureDataDir();
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  try {
+    ensureDataDir();
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error(`ERROR: Could not save to ${file}: ${err.message}`);
+    // Don't throw — let the bot continue; at worst a restart will lose this one change.
+  }
 }
 
 const cache = {
@@ -51,6 +56,10 @@ module.exports = {
     return cache.userEmojis[userId] || null;
   },
   setUserEmoji(userId, emoji) {
+    if (!userId || !emoji) {
+      console.warn(`[storage] setUserEmoji: invalid userId or emoji`);
+      return;
+    }
     cache.userEmojis[userId] = emoji;
     save(FILES.userEmojis, cache.userEmojis);
   },
@@ -60,6 +69,10 @@ module.exports = {
     return cache.userSettings[userId] || null;
   },
   setUserSettings(userId, data) {
+    if (!userId || !data) {
+      console.warn(`[storage] setUserSettings: invalid userId or data`);
+      return;
+    }
     cache.userSettings[userId] = { ...(cache.userSettings[userId] || {}), ...data };
     save(FILES.userSettings, cache.userSettings);
   },
@@ -72,10 +85,18 @@ module.exports = {
     return cache.tempChannels;
   },
   setTempChannel(channelId, data) {
+    if (!channelId || !data) {
+      console.warn(`[storage] setTempChannel: invalid channelId or data`);
+      return;
+    }
     cache.tempChannels[channelId] = data;
     save(FILES.tempChannels, cache.tempChannels);
   },
   deleteTempChannel(channelId) {
+    if (!channelId) {
+      console.warn(`[storage] deleteTempChannel: invalid channelId`);
+      return;
+    }
     delete cache.tempChannels[channelId];
     save(FILES.tempChannels, cache.tempChannels);
   },
@@ -85,7 +106,12 @@ module.exports = {
     return cache.guildConfig[guildId] || null;
   },
   setGuildConfig(guildId, data) {
+    if (!guildId || !data) {
+      console.warn(`[storage] setGuildConfig: invalid guildId or data`);
+      return;
+    }
     cache.guildConfig[guildId] = { ...(cache.guildConfig[guildId] || {}), ...data };
     save(FILES.guildConfig, cache.guildConfig);
   },
 };
+

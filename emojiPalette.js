@@ -1,55 +1,71 @@
 // The emoji a temp channel can be assigned — used for the random pick when a
 // channel is first created, and for the options in the Change Emoji picker.
-// Split into two sets purely because Discord caps a single select menu at 25
-// options — the Change Emoji picker shows both menus together so it's still
-// one pick, just from a bigger pool. Add, remove, or reorder freely, just
-// keep each set at 25 or fewer.
+// All emoji in one set for a single clean select menu.
+// Supports multi-codepoint emoji like 🐈‍⬛ via proper Unicode handling.
 
-const EMOJI_SET_A = [
+const EMOJI_PALETTE = [
+  { emoji: '🦢', label: 'Swan' },
+  { emoji: '💖', label: 'Sparkling Heart' },
+  { emoji: '🦋', label: 'Butterfly' },
+  { emoji: '🫧', label: 'Bubbles' },
+  { emoji: '🎀', label: 'Ribbon' },
   { emoji: '💕', label: 'Two Hearts' },
   { emoji: '🌸', label: 'Cherry Blossom' },
-  { emoji: '🔥', label: 'Fire' },
+  { emoji: '🐥', label: 'Baby Chick' },
+  { emoji: '💌', label: 'Love Letter' },
+  { emoji: '🕯️', label: 'Candle' },
+  { emoji: '✨', label: 'Sparkles' },
+  { emoji: '🍭', label: 'Lollipop' },
+  { emoji: '😍', label: 'Smiling Face Heart Eyes' },
+  { emoji: '😋', label: 'Yum Face' },
+  { emoji: '🥶', label: 'Cold Face' },
+  { emoji: '💀', label: 'Skull' },
   { emoji: '👾', label: 'Alien Monster' },
-  { emoji: '❤️', label: 'Red Heart' },
+  { emoji: '👻', label: 'Ghost' },
+  { emoji: '👽', label: 'Alien' },
+  { emoji: '🤡', label: 'Clown' },
+  { emoji: '🙈', label: 'See No Evil Monkey' },
+  { emoji: '🔥', label: 'Fire' },
+  { emoji: '🎊', label: 'Confetti Ball' },
+  { emoji: '😻', label: 'Smiling Cat Heart Eyes' },
+  { emoji: '💋', label: 'Kiss Mark' },
+  { emoji: '👀', label: 'Eyes' },
+  { emoji: '🫀', label: 'Anatomical Heart' },
+  { emoji: '🫂', label: 'People Hugging' },
+  { emoji: '🪷', label: 'Lotus' },
+  { emoji: '🍁', label: 'Maple Leaf' },
+  { emoji: '🍄', label: 'Mushroom' },
   { emoji: '🌼', label: 'Blossom' },
   { emoji: '☘️', label: 'Shamrock' },
-  { emoji: '🌟', label: 'Glowing Star' },
-  { emoji: '☀️', label: 'Sun' },
+  { emoji: '⭐', label: 'Star' },
+  { emoji: '❄️', label: 'Snowflake' },
   { emoji: '🪐', label: 'Ringed Planet' },
-  { emoji: '✨', label: 'Sparkles' },
+  { emoji: '🌍', label: 'Earth Globe Europe-Africa' },
   { emoji: '🐉', label: 'Dragon' },
-  { emoji: '🐍', label: 'Snake' },
   { emoji: '🐈', label: 'Cat' },
-  { emoji: '🐥', label: 'Baby Chick' },
-  { emoji: '🫧', label: 'Bubbles' },
-  { emoji: '🦋', label: 'Butterfly' },
+  { emoji: '🐈‍⬛', label: 'Black Cat' },
+  { emoji: '🐍', label: 'Snake' },
+  { emoji: '🪼', label: 'Jellyfish' },
+  { emoji: '🐙', label: 'Octopus' },
+  { emoji: '🐚', label: 'Spiral Shell' },
   { emoji: '🦂', label: 'Scorpion' },
   { emoji: '🕷️', label: 'Spider' },
-];
-
-const EMOJI_SET_B = [
-  { emoji: '🎀', label: 'Ribbon' },
-  { emoji: '☁️', label: 'Cloud' },
-  { emoji: '🧸', label: 'Teddy Bear' },
-  { emoji: '🌷', label: 'Tulip' },
-  { emoji: '🌙', label: 'Crescent Moon' },
+  { emoji: '🕸️', label: 'Spider Web' },
+  { emoji: '🐾', label: 'Paw Prints' },
   { emoji: '🍓', label: 'Strawberry' },
-  { emoji: '🐇', label: 'Rabbit' },
-  { emoji: '💌', label: 'Love Letter' },
-  { emoji: '🪽', label: 'Wing' },
+  { emoji: '🍬', label: 'Candy' },
   { emoji: '🧁', label: 'Cupcake' },
   { emoji: '🎧', label: 'Headphone' },
-  { emoji: '🪷', label: 'Lotus' },
-  { emoji: '💗', label: 'Growing Heart' },
-  { emoji: '🐚', label: 'Spiral Shell' },
-  { emoji: '🕯️', label: 'Candle' },
-  { emoji: '🦢', label: 'Swan' },
+  { emoji: '🔋', label: 'Battery' },
+  { emoji: '👑', label: 'Crown' },
+  { emoji: '💭', label: 'Thought Bubble' },
+  { emoji: '⚜️', label: 'Fleur-de-lis' },
+  { emoji: '♾️', label: 'Infinity' },
 ];
-
-const EMOJI_PALETTE = [...EMOJI_SET_A, ...EMOJI_SET_B];
 
 function randomEmoji() {
   return EMOJI_PALETTE[Math.floor(Math.random() * EMOJI_PALETTE.length)].emoji;
 }
 
-module.exports = { EMOJI_SET_A, EMOJI_SET_B, EMOJI_PALETTE, randomEmoji };
+module.exports = { EMOJI_PALETTE, randomEmoji };
+
