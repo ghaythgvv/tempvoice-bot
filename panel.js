@@ -174,11 +174,9 @@ async function handleEmojiOpen(interaction) {
       value: e.emoji,
       emoji: e.emoji,
     }));
-    const first = chunk[0].label;
-    const last = chunk[chunk.length - 1].label;
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`tempvc:emoji-select-${i}`)
-      .setPlaceholder(chunks.length > 1 ? `${first} – ${last}` : 'Choose an emoji')
+      .setPlaceholder(chunks.length > 1 ? `Emoji Set ${i + 1}` : 'Choose an emoji')
       .addOptions(options);
     return new ActionRowBuilder().addComponents(menu);
   });
@@ -352,5 +350,4 @@ async function handleDelete(interaction) {
 }
  
 module.exports = { handlePanelInteraction };
- 
  
