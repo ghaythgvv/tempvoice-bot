@@ -12,7 +12,7 @@ const {
 const storage = require('./storage');
 const { EMOJI_PALETTE } = require('./emojiPalette');
 const { applyEmojiToMember, removeEmojiFromMember } = require('./nickname');
-const { updateOwnerPermissions, destroyTempChannel } = require('./voiceManager');
+const { updateOwnerPermissions, destroyTempChannel, refreshPanelMessage } = require('./voiceManager');
  
 const EPHEMERAL = { flags: MessageFlags.Ephemeral };
  
@@ -94,6 +94,7 @@ async function handleLock(interaction) {
   await channel.permissionOverwrites.edit(everyone, { Connect: isLocked ? null : false });
   tempData.locked = !isLocked;
   storage.setTempChannel(voiceChannelId, tempData);
+  await refreshPanelMessage(channel, tempData);
   await interaction.reply({ content: SAVE_CONFIRMATION, ...EPHEMERAL });
 }
  
@@ -150,6 +151,7 @@ async function handleLimitSubmit(interaction) {
   await channel.setUserLimit(limit);
   tempData.limit = limit;
   storage.setTempChannel(voiceChannelId, tempData);
+  await refreshPanelMessage(channel, tempData);
   await interaction.reply({ content: SAVE_CONFIRMATION, ...EPHEMERAL });
 }
  
@@ -212,6 +214,7 @@ async function handleEmojiChange(interaction) {
   tempData.emoji = newEmoji;
   storage.setTempChannel(voiceChannelId, tempData);
   storage.setUserEmoji(tempData.ownerId, newEmoji); // remembered for next time they create a channel
+  await refreshPanelMessage(channel, tempData);
  
   await interaction.update({ content: `${newEmoji} Channel emoji updated for everyone.`, components: [] });
 }
@@ -270,6 +273,7 @@ async function handleTrustSelect(interaction) {
   }
   tempData.trusted = [...trusted];
   storage.setTempChannel(voiceChannelId, tempData);
+  await refreshPanelMessage(channel, tempData);
   await interaction.update({ content: SAVE_CONFIRMATION, components: [] });
 }
  
@@ -308,6 +312,7 @@ async function handleUntrustSelect(interaction) {
   tempData.trusted = (tempData.trusted || []).filter((id) => id !== targetId);
   storage.setTempChannel(voiceChannelId, tempData);
   await channel.permissionOverwrites.delete(targetId).catch(() => {});
+  await refreshPanelMessage(channel, tempData);
   await interaction.update({ content: SAVE_CONFIRMATION, components: [] });
 }
  
@@ -335,6 +340,7 @@ async function handleTransferSelect(interaction) {
   tempData.ownerId = newOwner.id;
   storage.setTempChannel(voiceChannelId, tempData);
   await updateOwnerPermissions(channel, oldOwnerId, newOwner.id);
+  await refreshPanelMessage(channel, tempData);
  
   await interaction.update({ content: `♣️ **${newOwner.displayName}** is now the channel owner.`, components: [] });
 }
