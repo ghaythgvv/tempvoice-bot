@@ -54,6 +54,8 @@ function snapshotOwnerSettings(tempData) {
     limit: tempData.limit || 0,
     locked: !!tempData.locked,
     trusted: tempData.trusted || [],
+    cleanupIntervalMinutes:
+      typeof tempData.cleanupIntervalMinutes === 'number' ? tempData.cleanupIntervalMinutes : 10,
   });
 }
  
@@ -133,6 +135,11 @@ async function createTempChannel(member, guild, config) {
     limit: (saved && saved.limit) || 0,
     locked: !!(saved && saved.locked),
     trusted: (saved && saved.trusted) || [],
+    // Defaults to 10 minutes unless the owner has changed it before and it
+    // got carried over via their saved profile.
+    cleanupIntervalMinutes:
+      saved && typeof saved.cleanupIntervalMinutes === 'number' ? saved.cleanupIntervalMinutes : 10,
+    lastPurgeAt: Date.now(),
     createdAt: Date.now(),
   };
   storage.setTempChannel(channel.id, tempDataRecord);
@@ -327,17 +334,32 @@ async function purgeChannelMessages(channel, tempData) {
  
 async function purgeAllTempChannels(client) {
   const all = storage.getAllTempChannels();
+  const now = Date.now();
   for (const channelId of Object.keys(all)) {
     const data = all[channelId];
+    // 0 (or missing, for very old records) means auto-delete is off for
+    // this channel — skip it entirely rather than defaulting it on.
+    const intervalMinutes = data.cleanupIntervalMinutes;
+    if (!intervalMinutes) continue;
+ 
+    const dueAt = (data.lastPurgeAt || data.createdAt || 0) + intervalMinutes * 60 * 1000;
+    if (now < dueAt) continue;
+ 
     const guild = client.guilds.cache.get(data.guildId);
     if (!guild) continue;
     const channel = guild.channels.cache.get(channelId);
     if (!channel) continue;
+ 
     await purgeChannelMessages(channel, data);
+    data.lastPurgeAt = now;
+    storage.setTempChannel(channelId, data);
   }
 }
  
-const PURGE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+// Checked every minute rather than run on a single fixed timer, so each
+// channel's own interval (5 min, 30 min, 1 hour, etc.) is respected
+// independently instead of everyone sharing one global schedule.
+const CLEANUP_CHECK_INTERVAL_MS = 60 * 1000;
 let cleanupIntervalStarted = false;
  
 function startPeriodicCleanup(client) {
@@ -345,8 +367,8 @@ function startPeriodicCleanup(client) {
   cleanupIntervalStarted = true;
   setInterval(() => {
     purgeAllTempChannels(client).catch((err) => console.warn(`[cleanup] sweep failed: ${err.message}`));
-  }, PURGE_INTERVAL_MS);
-  console.log(`[cleanup] Periodic message cleanup started — every ${PURGE_INTERVAL_MS / 60000} minutes.`);
+  }, CLEANUP_CHECK_INTERVAL_MS);
+  console.log('[cleanup] Periodic message cleanup started — checking every minute against each channel\'s own timer.');
 }
  
 module.exports = {
