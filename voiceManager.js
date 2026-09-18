@@ -276,6 +276,14 @@ async function reconcileOnStartup(client) {
 // Wipes every message in a temp channel's text chat except the panel itself,
 // so the chat doesn't fill up with clutter over time.
 async function purgeChannelMessages(channel, tempData) {
+  // Without a known panel message id, we can't safely tell the panel apart
+  // from anything else — skip this channel rather than risk deleting it.
+  // This only affects channels created before panelMessageId existed; any
+  // channel created from now on will always have one.
+  if (!tempData || !tempData.panelMessageId) {
+    console.warn(`[cleanup] skipping ${channel.name} — no known panel message id`);
+    return;
+  }
   try {
     const messages = await channel.messages.fetch({ limit: 100 });
     const toDelete = messages.filter((m) => m.id !== tempData.panelMessageId);
@@ -328,3 +336,4 @@ module.exports = {
   refreshPanelMessage,
   snapshotOwnerSettings,
 };
+ 
