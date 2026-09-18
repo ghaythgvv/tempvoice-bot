@@ -12,7 +12,17 @@ const ICONS = {
   untrust: ['untrust', '🖤'],
   transfer: ['transfer', '♣️'],
   delete: ['delete', '⬛'],
+  timer: ['timer', '⏱️'],
 };
+ 
+// Options shown in the auto-delete timer picker. minutes: 0 means "off".
+const CLEANUP_INTERVAL_OPTIONS = [
+  { minutes: 0, label: 'Off' },
+  { minutes: 5, label: 'Every 5 minutes' },
+  { minutes: 10, label: 'Every 10 minutes' },
+  { minutes: 30, label: 'Every 30 minutes' },
+  { minutes: 60, label: 'Every 1 hour' },
+];
  
 // Purple theme for the panel embed.
 const PANEL_COLOR = 0x9b59b6;
@@ -29,7 +39,11 @@ function buildStatusLines(tempData) {
     ? `${i('limit')} Limit: **${tempData.limit} members**`
     : `${i('limit')} Limit: **No limit**`;
   const emojiLine = `${i('emoji')} Emoji: **${tempData.emoji || 'None'}**`;
-  return [lockLine, limitLine, emojiLine];
+  const interval = tempData.cleanupIntervalMinutes;
+  const timerLine = interval
+    ? `${i('timer')} Auto-delete messages: **every ${interval} min**`
+    : `${i('timer')} Auto-delete messages: **off**`;
+  return [lockLine, limitLine, emojiLine, timerLine];
 }
  
 // ownerMember is a discord.js GuildMember, used for the avatar thumbnail and
@@ -54,7 +68,10 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
         `${i('trust')} **Trust** — let someone join even while the channel is locked`,
         `${i('untrust')} **Untrust** — remove someone from the trusted list`,
         `${i('transfer')} **Transfer Ownership** — hand the channel to someone else in it`,
+        `${i('timer')} **Auto-Delete Timer** — automatically clear chat messages on a schedule`,
         `${i('delete')} **Delete** — remove the channel right away`,
+      ].join('\n')
+    );
       ].join('\n')
     );
  
@@ -85,11 +102,14 @@ function buildPanelComponents() {
     new ButtonBuilder().setCustomId('tempvc:emoji').setLabel('Change Emoji').setEmoji(i('emoji')).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('tempvc:trust').setLabel('Trust').setEmoji(i('trust')).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('tempvc:untrust').setLabel('Untrust').setEmoji(i('untrust')).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('tempvc:transfer').setLabel('Transfer Ownership').setEmoji(i('transfer')).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('tempvc:transfer').setLabel('Transfer Ownership').setEmoji(i('transfer')).setStyle(ButtonStyle.Secondary)
+  );
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('tempvc:timer').setLabel('Auto-Delete Timer').setEmoji(i('timer')).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('tempvc:delete').setLabel('Delete').setEmoji(i('delete')).setStyle(ButtonStyle.Danger)
   );
-  return [row1, row2];
+  return [row1, row2, row3];
 }
  
-module.exports = { buildPanelEmbed, buildPanelComponents, buildPanelAttachments };
+module.exports = { buildPanelEmbed, buildPanelComponents, buildPanelAttachments, CLEANUP_INTERVAL_OPTIONS };
  
