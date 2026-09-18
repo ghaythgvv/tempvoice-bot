@@ -12,7 +12,7 @@ const {
 const storage = require('./storage');
 const { EMOJI_PALETTE } = require('./emojiPalette');
 const { applyEmojiToMember, removeEmojiFromMember } = require('./nickname');
-const { updateOwnerPermissions, destroyTempChannel, refreshPanelMessage } = require('./voiceManager');
+const { updateOwnerPermissions, destroyTempChannel, refreshPanelMessage, snapshotOwnerSettings } = require('./voiceManager');
  
 const EPHEMERAL = { flags: MessageFlags.Ephemeral };
  
@@ -94,6 +94,7 @@ async function handleLock(interaction) {
   await channel.permissionOverwrites.edit(everyone, { Connect: isLocked ? null : false });
   tempData.locked = !isLocked;
   storage.setTempChannel(voiceChannelId, tempData);
+  snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
   await interaction.reply({ content: SAVE_CONFIRMATION, ...EPHEMERAL });
 }
@@ -123,6 +124,7 @@ async function handleRenameSubmit(interaction) {
   await channel.setName(finalName);
   tempData.customName = newName;
   storage.setTempChannel(voiceChannelId, tempData);
+  snapshotOwnerSettings(tempData);
   await interaction.reply({ content: `✏️ Renamed to **${finalName}**.`, ...EPHEMERAL });
 }
  
@@ -151,6 +153,7 @@ async function handleLimitSubmit(interaction) {
   await channel.setUserLimit(limit);
   tempData.limit = limit;
   storage.setTempChannel(voiceChannelId, tempData);
+  snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
   await interaction.reply({ content: SAVE_CONFIRMATION, ...EPHEMERAL });
 }
@@ -273,6 +276,7 @@ async function handleTrustSelect(interaction) {
   }
   tempData.trusted = [...trusted];
   storage.setTempChannel(voiceChannelId, tempData);
+  snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
   await interaction.update({ content: SAVE_CONFIRMATION, components: [] });
 }
@@ -311,6 +315,7 @@ async function handleUntrustSelect(interaction) {
   const targetId = interaction.values[0];
   tempData.trusted = (tempData.trusted || []).filter((id) => id !== targetId);
   storage.setTempChannel(voiceChannelId, tempData);
+  snapshotOwnerSettings(tempData);
   await channel.permissionOverwrites.delete(targetId).catch(() => {});
   await refreshPanelMessage(channel, tempData);
   await interaction.update({ content: SAVE_CONFIRMATION, components: [] });
