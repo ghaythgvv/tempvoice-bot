@@ -2,7 +2,7 @@ const { ChannelType } = require('discord.js');
 const storage = require('./storage');
 const { randomEmoji } = require('./emojiPalette');
 const { applyEmojiToMember, removeEmojiFromMember, stripEmojiPrefixes } = require('./nickname');
-const { buildPanelEmbed, buildPanelComponents } = require('./panelView');
+const { buildPanelEmbed, buildPanelComponents, buildPanelAttachments } = require('./panelView');
 const { refreshDashboard } = require('./dashboard');
  
 const pendingDeletions = new Set(); // channelIds with a delete check already queued
@@ -79,7 +79,11 @@ async function refreshPanelMessage(channel, tempData) {
     const ownerMember = await channel.guild.members.fetch(tempData.ownerId).catch(() => null);
     const message = await channel.messages.fetch(tempData.panelMessageId).catch(() => null);
     if (message) {
-      await message.edit({ embeds: [buildPanelEmbed(ownerMember, tempData)], components: buildPanelComponents() });
+      await message.edit({
+        embeds: [buildPanelEmbed(ownerMember, tempData)],
+        components: buildPanelComponents(),
+        files: buildPanelAttachments(),
+      });
     }
   } catch (err) {
     console.warn(`[tempvc] could not refresh panel message: ${err.message}`);
@@ -154,6 +158,7 @@ async function createTempChannel(member, guild, config) {
     const panelMessage = await channel.send({
       embeds: [buildPanelEmbed(member, tempDataRecord)],
       components: buildPanelComponents(),
+      files: buildPanelAttachments(),
     });
     tempDataRecord.panelMessageId = panelMessage.id;
     storage.setTempChannel(channel.id, tempDataRecord);
@@ -265,6 +270,53 @@ async function sweepEmptyChannels(client) {
  
 async function reconcileOnStartup(client) {
   await sweepEmptyChannels(client);
+  startPeriodicCleanup(client);
+}
+ 
+// Wipes every message in a temp channel's text chat except the panel itself,
+// so the chat doesn't fill up with clutter over time.
+async function purgeChannelMessages(channel, tempData) {
+  try {
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const toDelete = messages.filter((m) => m.id !== tempData.panelMessageId);
+    if (toDelete.size === 0) return;
+    if (toDelete.size === 1) {
+      await toDelete.first().delete().catch(() => {});
+      return;
+    }
+    // Discord's bulk delete refuses messages older than 14 days; passing
+    // `true` here tells discord.js to silently skip those instead of
+    // throwing and aborting the whole batch.
+    await channel.bulkDelete(toDelete, true).catch((err) => {
+      console.warn(`[cleanup] bulkDelete failed in ${channel.name}: ${err.message}`);
+    });
+  } catch (err) {
+    console.warn(`[cleanup] could not purge messages in ${channel.name}: ${err.message}`);
+  }
+}
+ 
+async function purgeAllTempChannels(client) {
+  const all = storage.getAllTempChannels();
+  for (const channelId of Object.keys(all)) {
+    const data = all[channelId];
+    const guild = client.guilds.cache.get(data.guildId);
+    if (!guild) continue;
+    const channel = guild.channels.cache.get(channelId);
+    if (!channel) continue;
+    await purgeChannelMessages(channel, data);
+  }
+}
+ 
+const PURGE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+let cleanupIntervalStarted = false;
+ 
+function startPeriodicCleanup(client) {
+  if (cleanupIntervalStarted) return; // guard against double-registration on reconnect
+  cleanupIntervalStarted = true;
+  setInterval(() => {
+    purgeAllTempChannels(client).catch((err) => console.warn(`[cleanup] sweep failed: ${err.message}`));
+  }, PURGE_INTERVAL_MS);
+  console.log(`[cleanup] Periodic message cleanup started — every ${PURGE_INTERVAL_MS / 60000} minutes.`);
 }
  
 module.exports = {
@@ -276,4 +328,3 @@ module.exports = {
   refreshPanelMessage,
   snapshotOwnerSettings,
 };
- 
