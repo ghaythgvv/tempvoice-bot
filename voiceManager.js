@@ -285,19 +285,41 @@ async function purgeChannelMessages(channel, tempData) {
     return;
   }
   try {
-    const messages = await channel.messages.fetch({ limit: 100 });
-    const toDelete = messages.filter((m) => m.id !== tempData.panelMessageId);
-    if (toDelete.size === 0) return;
-    if (toDelete.size === 1) {
-      await toDelete.first().delete().catch(() => {});
-      return;
+    // fetch({ limit: 100 }) only ever returns one page — a channel with more
+    // than 100 messages needs repeated passes to actually get emptied out.
+    // Loop until a fetch comes back with nothing left to delete.
+    let totalDeleted = 0;
+    while (true) {
+      const messages = await channel.messages.fetch({ limit: 100 });
+      const toDelete = messages.filter((m) => m.id !== tempData.panelMessageId);
+      if (toDelete.size === 0) break;
+ 
+      if (toDelete.size === 1) {
+        await toDelete.first().delete().catch(() => {});
+        totalDeleted += 1;
+      } else {
+        // Discord's bulk delete refuses messages older than 14 days; passing
+        // `true` here tells discord.js to silently skip those instead of
+        // throwing and aborting the whole batch.
+        const deleted = await channel.bulkDelete(toDelete, true).catch((err) => {
+          console.warn(`[cleanup] bulkDelete failed in ${channel.name}: ${err.message}`);
+          return null;
+        });
+        if (!deleted) break; // avoid looping forever on a repeated failure
+        totalDeleted += deleted.size;
+        // bulkDelete silently skips messages older than 14 days rather than
+        // deleting them — if none of this batch was actually removable,
+        // stop instead of re-fetching the same stuck messages forever.
+        if (deleted.size === 0) break;
+      }
+ 
+      // If this fetch returned fewer than the full page, there's nothing
+      // more to page through.
+      if (messages.size < 100) break;
     }
-    // Discord's bulk delete refuses messages older than 14 days; passing
-    // `true` here tells discord.js to silently skip those instead of
-    // throwing and aborting the whole batch.
-    await channel.bulkDelete(toDelete, true).catch((err) => {
-      console.warn(`[cleanup] bulkDelete failed in ${channel.name}: ${err.message}`);
-    });
+    if (totalDeleted > 0) {
+      console.log(`[cleanup] deleted ${totalDeleted} message(s) in ${channel.name}`);
+    }
   } catch (err) {
     console.warn(`[cleanup] could not purge messages in ${channel.name}: ${err.message}`);
   }
