@@ -1,7 +1,7 @@
 const { ChannelType } = require('discord.js');
 const storage = require('./storage');
 const { randomEmoji } = require('./emojiPalette');
-const { applyEmojiToMember, removeEmojiFromMember } = require('./nickname');
+const { applyEmojiToMember, removeEmojiFromMember, stripEmojiPrefixes } = require('./nickname');
 const { buildPanelEmbed, buildPanelComponents } = require('./panelView');
 const { refreshDashboard } = require('./dashboard');
  
@@ -89,7 +89,13 @@ async function refreshPanelMessage(channel, tempData) {
 async function createTempChannel(member, guild, config) {
   const emoji = storage.getUserEmoji(member.id) || randomEmoji();
   const saved = storage.getUserSettings(member.id);
-  const baseName = (saved && saved.customName) || `${member.displayName}'s Channel`;
+  // member.displayName can still have a stuck emoji prefix on it if an
+  // earlier nickname edit failed (e.g. the bot's role sits below this
+  // member's role, so Discord silently rejected the rename). Stripping it
+  // here too — not just in nickname.js — is what stops that leftover emoji
+  // from also leaking into the new channel's name and showing up doubled.
+  const cleanDisplayName = stripEmojiPrefixes(member.displayName);
+  const baseName = (saved && saved.customName) || `${cleanDisplayName}'s Channel`;
   const channelName = sanitizeChannelName(`${emoji} ${baseName}`);
  
   let channel;
@@ -268,5 +274,6 @@ module.exports = {
   updateOwnerPermissions,
   destroyTempChannel,
   refreshPanelMessage,
+  snapshotOwnerSettings,
 };
  
