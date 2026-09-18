@@ -72,8 +72,6 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
         `${i('delete')} **Delete** — remove the channel right away`,
       ].join('\n')
     );
-      ].join('\n')
-    );
  
   if (ownerMember) {
     embed.setThumbnail(ownerMember.displayAvatarURL({ size: 256 }));
