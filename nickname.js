@@ -4,10 +4,10 @@
 // else. That's what guarantees a member never ends up with more than one
 // channel emoji stacked on their name, no matter which order events land in
 // or which palette version applied an older one.
-
+ 
 const MAX_NICK_LENGTH = 32;
 const EMOJI_PREFIX_RE = /^\p{Extended_Pictographic}\uFE0F?\s/u;
-
+ 
 function stripEmojiPrefixes(name) {
   let result = name;
   while (EMOJI_PREFIX_RE.test(result)) {
@@ -15,7 +15,7 @@ function stripEmojiPrefixes(name) {
   }
   return result;
 }
-
+ 
 async function applyEmojiToMember(member, emoji) {
   try {
     const current = member.displayName;
@@ -30,7 +30,7 @@ async function applyEmojiToMember(member, emoji) {
     console.warn(`[nickname] could not update ${member.user.tag}: ${err.message}`);
   }
 }
-
+ 
 async function removeEmojiFromMember(member) {
   try {
     const current = member.displayName;
@@ -41,5 +41,6 @@ async function removeEmojiFromMember(member) {
     console.warn(`[nickname] could not restore ${member.user.tag}: ${err.message}`);
   }
 }
-
-module.exports = { applyEmojiToMember, removeEmojiFromMember };
+ 
+module.exports = { applyEmojiToMember, removeEmojiFromMember, stripEmojiPrefixes };
+ 
