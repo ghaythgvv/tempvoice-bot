@@ -1,4 +1,5 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const path = require('path');
 const { iconForComponent, iconForText } = require('./customIcons');
  
 // Each entry: [lookup name for a custom app emoji, Unicode fallback]
@@ -16,6 +17,17 @@ const ICONS = {
  
 // Purple theme for the panel embed.
 const PANEL_COLOR = 0x9b59b6;
+ 
+// The banner GIF shown near the bottom of the panel. Ships as a real file in
+// the repo (not a remote URL) so it never breaks or goes offline — Discord
+// requires an "attachment://" reference, paired with the file actually being
+// attached to the message (see buildPanelAttachments below).
+const PANEL_IMAGE_FILENAME = 'ELT_esports_banner.gif';
+const PANEL_IMAGE_PATH = path.join(__dirname, PANEL_IMAGE_FILENAME);
+ 
+function buildPanelAttachments() {
+  return [new AttachmentBuilder(PANEL_IMAGE_PATH, { name: PANEL_IMAGE_FILENAME })];
+}
  
 // Plain-language status lines shown above the button descriptions, so the
 // owner can see the channel's current state at a glance without having to
@@ -63,6 +75,8 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
     embed.setFooter({ text: `Owner: ${ownerMember.displayName}` });
   }
  
+  embed.setImage(`attachment://${PANEL_IMAGE_FILENAME}`);
+ 
   return embed;
 }
  
@@ -84,5 +98,5 @@ function buildPanelComponents() {
   return [row1, row2];
 }
  
-module.exports = { buildPanelEmbed, buildPanelComponents };
+module.exports = { buildPanelEmbed, buildPanelComponents, buildPanelAttachments };
  
