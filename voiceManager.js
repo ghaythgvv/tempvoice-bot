@@ -7,6 +7,24 @@ const { refreshDashboard } = require('./dashboard');
  
 const pendingDeletions = new Set(); // channelIds with a delete check already queued
  
+// Fixed (non-temp) voice channels that should still sync their emoji onto
+// anyone sitting in them, same as temp channels do — just for these two
+// specific static channels rather than every generated temp channel.
+const STATIC_EMOJI_SYNC_CHANNEL_IDS = new Set([
+  '1517940974125318166',
+  '1517941337700176003',
+]);
+ 
+// Grabs whatever emoji the channel's own name starts with, so renaming the
+// channel automatically changes what gets applied — no separate config to
+// keep in sync. No trailing-space requirement here (channel names often
+// don't have one), unlike the nickname-prefix matcher in nickname.js.
+const LEADING_EMOJI_RE = /^\p{Extended_Pictographic}\uFE0F?/u;
+function getChannelLeadingEmoji(channel) {
+  const match = channel?.name?.match(LEADING_EMOJI_RE);
+  return match ? match[0] : null;
+}
+ 
 // Discord's channel-name validation rejects a few things that easily slip
 // into a name built from someone's raw display name: repeated whitespace,
 // leading/trailing whitespace, and it enforces a 100-character cap. This
@@ -241,15 +259,30 @@ function scheduleEmptyCheck(channelId, guild) {
  
 async function handleVoiceStateUpdate(oldState, newState) {
   const guild = newState.guild || oldState.guild;
-  const config = storage.getGuildConfig(guild.id);
-  if (!config) return;
- 
   const member = newState.member || oldState.member;
   if (!member || member.user.bot) return;
  
   const oldChannelId = oldState.channelId;
   const newChannelId = newState.channelId;
   if (oldChannelId === newChannelId) return;
+ 
+  // Static REPORT-style channels sync their own emoji onto whoever's sitting
+  // in them, same idea as temp channels but for a couple of fixed channels.
+  // Checked before the temp-channel config gate below so it still works
+  // even in a guild that hasn't set up temp voice channels at all.
+  const leftStaticChannel = oldChannelId && STATIC_EMOJI_SYNC_CHANNEL_IDS.has(oldChannelId);
+  const joinedStaticChannel = newChannelId && STATIC_EMOJI_SYNC_CHANNEL_IDS.has(newChannelId);
+  if (leftStaticChannel && !joinedStaticChannel) {
+    await removeEmojiFromMember(member);
+  }
+  if (joinedStaticChannel) {
+    const channel = guild.channels.cache.get(newChannelId);
+    const emoji = getChannelLeadingEmoji(channel);
+    if (emoji) await applyEmojiToMember(member, emoji);
+  }
+ 
+  const config = storage.getGuildConfig(guild.id);
+  if (!config) return;
  
   // Leave is handled BEFORE join on purpose: moving directly from one temp
   // channel to another fires a single event with both an old and a new
