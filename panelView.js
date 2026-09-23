@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { iconForComponent, iconForText } = require('./customIcons');
- 
+
 // Each entry: [lookup name for a custom app emoji, Unicode fallback]
 const ICONS = {
   lock: ['lock_unlock', '🔳'],
@@ -14,19 +14,20 @@ const ICONS = {
   delete: ['delete', '⬛'],
   timer: ['timer', '⏱️'],
 };
- 
+
 // Options shown in the auto-delete timer picker. minutes: 0 means "off".
 const CLEANUP_INTERVAL_OPTIONS = [
   { minutes: 0, label: 'Off' },
+  { minutes: 3, label: 'Every 3 minutes' },
   { minutes: 5, label: 'Every 5 minutes' },
   { minutes: 10, label: 'Every 10 minutes' },
   { minutes: 30, label: 'Every 30 minutes' },
   { minutes: 60, label: 'Every 1 hour' },
 ];
- 
+
 // Purple theme for the panel embed.
 const PANEL_COLOR = 0x9b59b6;
- 
+
 // Plain-language status lines shown above the button descriptions, so the
 // owner can see the channel's current state at a glance without having to
 // remember what they last set.
@@ -40,12 +41,20 @@ function buildStatusLines(tempData) {
     : `${i('limit')} Limit: **No limit**`;
   const emojiLine = `${i('emoji')} Emoji: **${tempData.emoji || 'None'}**`;
   const interval = tempData.cleanupIntervalMinutes;
-  const timerLine = interval
-    ? `${i('timer')} Auto-delete messages: **every ${interval} min**`
-    : `${i('timer')} Auto-delete messages: **off**`;
+  let timerLine;
+  if (!interval) {
+    timerLine = `${i('timer')} Auto-delete messages: **off**`;
+  } else {
+    const nextPurgeAt = (tempData.lastPurgeAt || tempData.createdAt || Date.now()) + interval * 60 * 1000;
+    const nextPurgeUnix = Math.floor(nextPurgeAt / 1000);
+    // <t:...:R> is Discord's own relative-timestamp format — it renders as
+    // a live "in 3 minutes" that keeps counting down on its own in every
+    // viewer's client, with no need for the bot to keep editing the message.
+    timerLine = `${i('timer')} Auto-delete messages: **every ${interval} min** — next: <t:${nextPurgeUnix}:R>`;
+  }
   return [lockLine, limitLine, emojiLine, timerLine];
 }
- 
+
 // ownerMember is a discord.js GuildMember, used for the avatar thumbnail and
 // footer. tempData is the same record stored in storage.js (locked, limit,
 // emoji, etc.) — both are optional so this still works if called with
@@ -72,22 +81,22 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
         `${i('delete')} **Delete** — remove the channel right away`,
       ].join('\n')
     );
- 
+
   if (ownerMember) {
     embed.setThumbnail(ownerMember.displayAvatarURL({ size: 256 }));
     embed.setFooter({ text: `Owner: ${ownerMember.displayName}` });
   }
- 
+
   return embed;
 }
- 
+
 // No banner image right now — kept as a function (returning nothing) so any
 // `files: buildPanelAttachments()` calls elsewhere keep working unchanged if
 // an image gets added back later.
 function buildPanelAttachments() {
   return [];
 }
- 
+
 function buildPanelComponents() {
   const i = (key) => iconForComponent(...ICONS[key]);
   const row1 = new ActionRowBuilder().addComponents(
@@ -108,6 +117,5 @@ function buildPanelComponents() {
   );
   return [row1, row2, row3];
 }
- 
+
 module.exports = { buildPanelEmbed, buildPanelComponents, buildPanelAttachments, CLEANUP_INTERVAL_OPTIONS };
- 
