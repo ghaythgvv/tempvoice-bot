@@ -266,34 +266,30 @@ async function handleVoiceStateUpdate(oldState, newState) {
   const newChannelId = newState.channelId;
   if (oldChannelId === newChannelId) return;
  
-  // Static REPORT-style channels sync their own emoji onto whoever's sitting
-  // in them, same idea as temp channels but for a couple of fixed channels.
-  // Checked before the temp-channel config gate below so it still works
-  // even in a guild that hasn't set up temp voice channels at all.
-  const leftStaticChannel = oldChannelId && STATIC_EMOJI_SYNC_CHANNEL_IDS.has(oldChannelId);
   const joinedStaticChannel = newChannelId && STATIC_EMOJI_SYNC_CHANNEL_IDS.has(newChannelId);
-  if (leftStaticChannel && !joinedStaticChannel) {
+  const leftStaticChannel = oldChannelId && STATIC_EMOJI_SYNC_CHANNEL_IDS.has(oldChannelId);
+ 
+  const config = storage.getGuildConfig(guild.id);
+  const oldTempData = oldChannelId ? storage.getTempChannel(oldChannelId) : null;
+ 
+  // Always resolve any "leaving" cleanup FIRST — whether that's a temp
+  // channel's own emoji tracking or a static synced channel — before
+  // applying whatever emoji the destination calls for. Doing this in the
+  // opposite order let a temp channel's leave-cleanup strip an emoji that
+  // had just been applied a moment earlier by joining a static channel.
+  if (oldTempData) {
+    await onLeaveTracked(member, oldChannelId, guild);
+  } else if (leftStaticChannel && !joinedStaticChannel) {
     await removeEmojiFromMember(member);
   }
+ 
   if (joinedStaticChannel) {
     const channel = guild.channels.cache.get(newChannelId);
     const emoji = getChannelLeadingEmoji(channel);
     if (emoji) await applyEmojiToMember(member, emoji);
   }
  
-  const config = storage.getGuildConfig(guild.id);
   if (!config) return;
- 
-  // Leave is handled BEFORE join on purpose: moving directly from one temp
-  // channel to another fires a single event with both an old and a new
-  // channel, and stripping the old emoji first is what stops the new one
-  // from getting stacked on top of it.
-  if (oldChannelId) {
-    const oldTempData = storage.getTempChannel(oldChannelId);
-    if (oldTempData) {
-      await onLeaveTracked(member, oldChannelId, guild);
-    }
-  }
  
   if (newChannelId === config.joinToCreateId) {
     await createTempChannel(member, guild, config);
