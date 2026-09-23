@@ -53,6 +53,27 @@ function buildMemberSelect(customId, placeholder, channel, excludeId) {
 }
  
 async function handlePanelInteraction(interaction) {
+  try {
+    await routeInteraction(interaction);
+  } catch (err) {
+    // Catch-all so a bug in any single handler never leaves the button
+    // stuck loading forever or crashes the bot — the user gets a clear,
+    // ephemeral error instead.
+    console.error(`[panel] unhandled error on ${interaction.customId}: ${err.stack || err.message}`);
+    const payload = { content: '⚠️ Something went wrong handling that — please try again.', components: [], ...EPHEMERAL };
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(payload).catch(() => {});
+      } else {
+        await interaction.reply(payload).catch(() => {});
+      }
+    } catch {
+      // Nothing more we can do — the interaction token likely expired.
+    }
+  }
+}
+ 
+async function routeInteraction(interaction) {
   if (interaction.isButton()) {
     const [, action] = interaction.customId.split(':');
     if (action === 'lock') return handleLock(interaction);
@@ -272,10 +293,13 @@ async function handleTrustSelect(interaction) {
   if (ownerErr) return interaction.update({ content: ownerErr, components: [] });
  
   const trusted = new Set(tempData.trusted || []);
-  for (const userId of interaction.values) {
-    trusted.add(userId);
-    await channel.permissionOverwrites.edit(userId, { Connect: true }).catch(() => {});
-  }
+  for (const userId of interaction.values) trusted.add(userId);
+  // Grant everyone's permission in parallel instead of one at a time.
+  await Promise.all(
+    interaction.values.map((userId) =>
+      channel.permissionOverwrites.edit(userId, { Connect: true }).catch(() => {})
+    )
+  );
   tempData.trusted = [...trusted];
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
@@ -320,9 +344,10 @@ async function handleUntrustSelect(interaction) {
   tempData.trusted = (tempData.trusted || []).filter((id) => !targetIds.has(id));
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
-  for (const targetId of targetIds) {
-    await channel.permissionOverwrites.delete(targetId).catch(() => {});
-  }
+  // Revoke everyone's permission in parallel instead of one at a time.
+  await Promise.all(
+    [...targetIds].map((targetId) => channel.permissionOverwrites.delete(targetId).catch(() => {}))
+  );
   await refreshPanelMessage(channel, tempData);
   await interaction.update({ content: SAVE_CONFIRMATION, components: [] });
 }
