@@ -4,9 +4,9 @@ const { randomEmoji } = require('./emojiPalette');
 const { applyEmojiToMember, removeEmojiFromMember, stripEmojiPrefixes } = require('./nickname');
 const { buildPanelEmbed, buildPanelComponents, buildPanelAttachments } = require('./panelView');
 const { refreshDashboard } = require('./dashboard');
-
+ 
 const pendingDeletions = new Set(); // channelIds with a delete check already queued
-
+ 
 // Discord's channel-name validation rejects a few things that easily slip
 // into a name built from someone's raw display name: repeated whitespace,
 // leading/trailing whitespace, and it enforces a 100-character cap. This
@@ -18,7 +18,7 @@ function sanitizeChannelName(name) {
     .trim()
     .slice(0, 100);
 }
-
+ 
 // Extra permissions the channel owner gets on their own channel, on top of
 // whatever the panel buttons already let them do — mainly so they can also
 // use Discord's own right-click menu to move/mute/deafen people in it, and
@@ -30,7 +30,7 @@ const OWNER_CHANNEL_PERMISSIONS = {
   DeafenMembers: true,
   Connect: true,
 };
-
+ 
 async function updateOwnerPermissions(channel, oldOwnerId, newOwnerId) {
   try {
     if (oldOwnerId && oldOwnerId !== newOwnerId) {
@@ -43,7 +43,7 @@ async function updateOwnerPermissions(channel, oldOwnerId, newOwnerId) {
     console.warn(`[permissions] could not update owner overwrite: ${err.message}`);
   }
 }
-
+ 
 // Saves the channel's current name/limit/locked/trusted state under its
 // owner, so the next channel that owner creates can start off the same way.
 // Called right before a temp channel is torn down, wherever that happens.
@@ -58,7 +58,7 @@ function snapshotOwnerSettings(tempData) {
       typeof tempData.cleanupIntervalMinutes === 'number' ? tempData.cleanupIntervalMinutes : 10,
   });
 }
-
+ 
 // The one place a temp channel actually gets deleted — snapshots the
 // owner's settings first, then clears the live record, then removes the
 // Discord channel itself.
@@ -70,7 +70,7 @@ async function destroyTempChannel(guild, channel, channelId, tempData) {
   }
   await refreshDashboard(guild).catch(() => {});
 }
-
+ 
 // Re-renders the panel embed/buttons in place after a setting changes
 // (lock state, limit, emoji, owner, etc.) so the status lines shown to the
 // owner never go stale. Safe to call even if the panel message was somehow
@@ -107,7 +107,7 @@ async function refreshPanelMessage(channel, tempData) {
     console.warn(`[tempvc] could not refresh panel message: ${err.message}`);
   }
 }
-
+ 
 async function createTempChannel(member, guild, config) {
   const emoji = storage.getUserEmoji(member.id) || randomEmoji();
   const saved = storage.getUserSettings(member.id);
@@ -119,7 +119,7 @@ async function createTempChannel(member, guild, config) {
   const cleanDisplayName = stripEmojiPrefixes(member.displayName);
   const baseName = (saved && saved.customName) || `${cleanDisplayName}'s Channel`;
   const channelName = sanitizeChannelName(`${emoji} ${baseName}`);
-
+ 
   let channel;
   try {
     channel = await guild.channels.create({
@@ -142,7 +142,7 @@ async function createTempChannel(member, guild, config) {
       return;
     }
   }
-
+ 
   const tempDataRecord = {
     guildId: guild.id,
     ownerId: member.id,
@@ -159,9 +159,9 @@ async function createTempChannel(member, guild, config) {
     createdAt: Date.now(),
   };
   storage.setTempChannel(channel.id, tempDataRecord);
-
+ 
   await updateOwnerPermissions(channel, null, member.id);
-
+ 
   // Restore the locked state and re-grant anyone who was trusted before —
   // do this before anyone (including the owner) actually joins.
   if (saved && saved.locked) {
@@ -177,7 +177,7 @@ async function createTempChannel(member, guild, config) {
       )
     );
   }
-
+ 
   // Post the control panel right in this channel's own chat, so it's there
   // the moment anyone opens it — no need to go find a shared panel channel.
   // The message id gets saved so later setting changes (lock, limit, emoji,
@@ -193,7 +193,7 @@ async function createTempChannel(member, guild, config) {
   } catch (err) {
     console.warn(`[tempvc] could not post the panel in ${channel.name}: ${err.message}`);
   }
-
+ 
   try {
     await member.voice.setChannel(channel);
   } catch (err) {
@@ -201,19 +201,19 @@ async function createTempChannel(member, guild, config) {
     await channel.delete().catch(() => {});
     storage.deleteTempChannel(channel.id);
   }
-
+ 
   await refreshDashboard(guild).catch(() => {});
 }
-
+ 
 async function onJoinTracked(member, tempData) {
   await applyEmojiToMember(member, tempData.emoji);
 }
-
+ 
 async function onLeaveTracked(member, channelId, guild) {
   await removeEmojiFromMember(member);
   scheduleEmptyCheck(channelId, guild);
 }
-
+ 
 // Checks (and deletes) an empty channel as soon as the current event-loop
 // tick clears, instead of waiting on a fixed timer. That still lets any
 // voice state update that's already in flight (e.g. someone else moving
@@ -238,19 +238,19 @@ function scheduleEmptyCheck(channelId, guild) {
     }
   });
 }
-
+ 
 async function handleVoiceStateUpdate(oldState, newState) {
   const guild = newState.guild || oldState.guild;
   const config = storage.getGuildConfig(guild.id);
   if (!config) return;
-
+ 
   const member = newState.member || oldState.member;
   if (!member || member.user.bot) return;
-
+ 
   const oldChannelId = oldState.channelId;
   const newChannelId = newState.channelId;
   if (oldChannelId === newChannelId) return;
-
+ 
   // Leave is handled BEFORE join on purpose: moving directly from one temp
   // channel to another fires a single event with both an old and a new
   // channel, and stripping the old emoji first is what stops the new one
@@ -261,12 +261,12 @@ async function handleVoiceStateUpdate(oldState, newState) {
       await onLeaveTracked(member, oldChannelId, guild);
     }
   }
-
+ 
   if (newChannelId === config.joinToCreateId) {
     await createTempChannel(member, guild, config);
     return;
   }
-
+ 
   if (newChannelId) {
     const newTempData = storage.getTempChannel(newChannelId);
     if (newTempData) {
@@ -274,7 +274,7 @@ async function handleVoiceStateUpdate(oldState, newState) {
     }
   }
 }
-
+ 
 // Deletes any tracked channel that's empty right now. Used on a timer and at
 // startup so the bot cleans up properly even after a restart or brief outage.
 async function sweepEmptyChannels(client) {
@@ -295,12 +295,12 @@ async function sweepEmptyChannels(client) {
     }
   }
 }
-
+ 
 async function reconcileOnStartup(client) {
   await sweepEmptyChannels(client);
   startPeriodicCleanup(client);
 }
-
+ 
 // Wipes every message in a temp channel's text chat except the panel itself,
 // so the chat doesn't fill up with clutter over time.
 async function purgeChannelMessages(channel, tempData) {
@@ -321,7 +321,7 @@ async function purgeChannelMessages(channel, tempData) {
       const messages = await channel.messages.fetch({ limit: 100 });
       const toDelete = messages.filter((m) => m.id !== tempData.panelMessageId);
       if (toDelete.size === 0) break;
-
+ 
       if (toDelete.size === 1) {
         await toDelete.first().delete().catch(() => {});
         totalDeleted += 1;
@@ -340,7 +340,7 @@ async function purgeChannelMessages(channel, tempData) {
         // stop instead of re-fetching the same stuck messages forever.
         if (deleted.size === 0) break;
       }
-
+ 
       // If this fetch returned fewer than the full page, there's nothing
       // more to page through.
       if (messages.size < 100) break;
@@ -352,7 +352,7 @@ async function purgeChannelMessages(channel, tempData) {
     console.warn(`[cleanup] could not purge messages in ${channel.name}: ${err.message}`);
   }
 }
-
+ 
 async function purgeAllTempChannels(client) {
   const all = storage.getAllTempChannels();
   const now = Date.now();
@@ -362,28 +362,28 @@ async function purgeAllTempChannels(client) {
     // this channel — skip it entirely rather than defaulting it on.
     const intervalMinutes = data.cleanupIntervalMinutes;
     if (!intervalMinutes) continue;
-
+ 
     const dueAt = (data.lastPurgeAt || data.createdAt || 0) + intervalMinutes * 60 * 1000;
     if (now < dueAt) continue;
-
+ 
     const guild = client.guilds.cache.get(data.guildId);
     if (!guild) continue;
     const channel = guild.channels.cache.get(channelId);
     if (!channel) continue;
-
+ 
     await purgeChannelMessages(channel, data);
     data.lastPurgeAt = now;
     storage.setTempChannel(channelId, data);
     await refreshPanelMessage(channel, data); // updates the countdown to the next run
   }
 }
-
+ 
 // Checked every minute rather than run on a single fixed timer, so each
 // channel's own interval (5 min, 30 min, 1 hour, etc.) is respected
 // independently instead of everyone sharing one global schedule.
 const CLEANUP_CHECK_INTERVAL_MS = 60 * 1000;
 let cleanupIntervalStarted = false;
-
+ 
 function startPeriodicCleanup(client) {
   if (cleanupIntervalStarted) return; // guard against double-registration on reconnect
   cleanupIntervalStarted = true;
@@ -392,7 +392,7 @@ function startPeriodicCleanup(client) {
   }, CLEANUP_CHECK_INTERVAL_MS);
   console.log('[cleanup] Periodic message cleanup started — checking every minute against each channel\'s own timer.');
 }
-
+ 
 module.exports = {
   handleVoiceStateUpdate,
   sweepEmptyChannels,
@@ -402,3 +402,4 @@ module.exports = {
   refreshPanelMessage,
   snapshotOwnerSettings,
 };
+ 
