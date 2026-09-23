@@ -13,6 +13,10 @@ const pendingDeletions = new Set(); // channelIds with a delete check already qu
 const STATIC_EMOJI_SYNC_CHANNEL_IDS = new Set([
   '1517940974125318166',
   '1517941337700176003',
+  '1543001094781665370',
+  '1513904253423587451',
+  '1519068432316760286',
+  '1543346189276160241',
 ]);
  
 // Grabs whatever emoji the channel's own name starts with, so renaming the
