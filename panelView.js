@@ -3,8 +3,7 @@ const { iconForComponent, iconForText } = require('./customIcons');
 
 // Each entry: [lookup name for a custom app emoji, Unicode fallback]
 const ICONS = {
-  lock: ['lock', '🔒'],
-  unlock: ['unlock', '🔓'],
+  lock: ['lock_unlock', '🔳'],
   rename: ['rename', '▫️'],
   limit: ['limit', '🔘'],
   kick: ['kick', '✖️'],
@@ -33,9 +32,7 @@ const PANEL_COLOR = 0x9b59b6;
 // limit, emoji, and the auto-delete timer, separated by middle dots.
 function buildStatusLine(tempData) {
   const i = (key) => iconForText(...ICONS[key]);
-  // Two distinct icons (not one icon relabeled) so the state reads correctly
-  // at a glance instead of always showing a closed-lock glyph.
-  const lockPart = tempData.locked ? `${i('lock')} Locked` : `${i('unlock')} Unlocked`;
+  const lockPart = tempData.locked ? `${i('lock')} Locked` : `${i('lock')} Unlocked`;
   const limitPart = tempData.limit ? `Limit **${tempData.limit}**` : 'No limit';
   const emojiPart = `Emoji ${tempData.emoji || 'none'}`;
 
