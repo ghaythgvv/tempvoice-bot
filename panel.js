@@ -17,12 +17,11 @@ const { updateOwnerPermissions, destroyTempChannel, refreshPanelMessage, snapsho
 
 const EPHEMERAL = { flags: MessageFlags.Ephemeral };
 
-// Sent after Lock/Unlock, Limit, Trust, or Untrust — the settings that get
-// snapshotted to the owner's saved profile and restored on their next
-// channel (see snapshotOwnerSettings / createTempChannel in voiceManager.js).
-const SAVE_CONFIRMATION =
-  '✅ Saved!\n' +
-  "This'll carry over automatically next time your channel gets recreated.";
+// One short line per setting instead of a single generic "Saved!" reused
+// everywhere — the owner sees exactly what carries over next time.
+function savedReply(summary) {
+  return `✅ **Saved** — ${summary}, and it'll carry over next time your channel gets recreated.`;
+}
 
 // Looks up the temp channel the invoking member is currently sitting in, if any.
 function getOwnedTempChannel(interaction) {
@@ -119,7 +118,8 @@ async function handleLock(interaction) {
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
-  await interaction.reply({ content: SAVE_CONFIRMATION, ...EPHEMERAL });
+  const summary = tempData.locked ? '🔒 channel locked' : '🔓 channel unlocked';
+  await interaction.reply({ content: savedReply(summary), ...EPHEMERAL });
 }
 
 async function handleRenameOpen(interaction) {
@@ -148,6 +148,8 @@ async function handleRenameSubmit(interaction) {
   tempData.customName = newName;
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
+  // Rename is per-channel, not carried over on recreation — so this uses
+  // its own short confirmation rather than the shared savedReply() wording.
   await interaction.reply({ content: `✏️ Renamed to **${finalName}**.`, ...EPHEMERAL });
 }
 
@@ -178,7 +180,8 @@ async function handleLimitSubmit(interaction) {
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
-  await interaction.reply({ content: SAVE_CONFIRMATION, ...EPHEMERAL });
+  const summary = limit ? `limit set to **${limit}**` : 'limit removed';
+  await interaction.reply({ content: savedReply(summary), ...EPHEMERAL });
 }
 
 async function handleEmojiOpen(interaction) {
@@ -242,7 +245,7 @@ async function handleEmojiChange(interaction) {
   storage.setUserEmoji(tempData.ownerId, newEmoji); // remembered for next time they create a channel
   await refreshPanelMessage(channel, tempData);
 
-  await interaction.update({ content: `${newEmoji} Channel emoji updated for everyone.`, components: [] });
+  await interaction.update({ content: savedReply(`emoji set to ${newEmoji}`), components: [] });
 }
 
 async function handleKickOpen(interaction) {
@@ -304,7 +307,9 @@ async function handleTrustSelect(interaction) {
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
-  await interaction.update({ content: SAVE_CONFIRMATION, components: [] });
+  const count = interaction.values.length;
+  const summary = count === 1 ? '1 member trusted' : `${count} members trusted`;
+  await interaction.update({ content: savedReply(summary), components: [] });
 }
 
 async function handleUntrustOpen(interaction) {
@@ -349,7 +354,9 @@ async function handleUntrustSelect(interaction) {
     [...targetIds].map((targetId) => channel.permissionOverwrites.delete(targetId).catch(() => {}))
   );
   await refreshPanelMessage(channel, tempData);
-  await interaction.update({ content: SAVE_CONFIRMATION, components: [] });
+  const count = targetIds.size;
+  const summary = count === 1 ? '1 member untrusted' : `${count} members untrusted`;
+  await interaction.update({ content: savedReply(summary), components: [] });
 }
 
 async function handleTransferOpen(interaction) {
@@ -378,6 +385,8 @@ async function handleTransferSelect(interaction) {
   await updateOwnerPermissions(channel, oldOwnerId, newOwner.id);
   await refreshPanelMessage(channel, tempData);
 
+  // Ownership transfer isn't part of the owner-settings snapshot, so it
+  // gets its own confirmation rather than savedReply().
   await interaction.update({ content: `♣️ **${newOwner.displayName}** is now the channel owner.`, components: [] });
 }
 
@@ -418,10 +427,8 @@ async function handleTimerSelect(interaction) {
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
 
-  const confirmText = minutes
-    ? `⏱️ Chat will now auto-clear every **${minutes} minutes**.`
-    : '⏱️ Auto-delete turned **off**.';
-  await interaction.update({ content: confirmText, components: [] });
+  const summary = minutes ? `auto-delete set to every **${minutes}m**` : 'auto-delete turned **off**';
+  await interaction.update({ content: savedReply(summary), components: [] });
 }
 
 async function handleDelete(interaction) {
