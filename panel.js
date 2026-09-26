@@ -1,5 +1,7 @@
 const {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   StringSelectMenuBuilder,
   UserSelectMenuBuilder,
   ModalBuilder,
@@ -33,11 +35,22 @@ function getOwnedTempChannel(interaction) {
   return { voiceChannelId, tempData, channel: member.voice.channel };
 }
 
+// Owner check that now also unlocks the claim path: if the recorded owner
+// has left the channel, anyone still inside is allowed to press Claim
+// (handled separately in handleClaim) even though every other owner-only
+// action still requires them to actually BE that owner.
 function requireOwner(interaction, tempData) {
   if (tempData.ownerId !== interaction.user.id) {
     return 'Only the channel owner can do that.';
   }
   return null;
+}
+
+// True once the recorded owner is no longer sitting in the channel — used
+// to gate the Claim button/flow and to decide whether panelView should show
+// "Transfer Ownership" or "Claim Ownership".
+function isOwnerless(channel, tempData) {
+  return !channel.members.has(tempData.ownerId);
 }
 
 // Builds a select menu listing everyone currently in the channel except the owner.
@@ -83,8 +96,11 @@ async function routeInteraction(interaction) {
     if (action === 'trust') return handleTrustOpen(interaction);
     if (action === 'untrust') return handleUntrustOpen(interaction);
     if (action === 'transfer') return handleTransferOpen(interaction);
+    if (action === 'claim') return handleClaim(interaction);
     if (action === 'timer') return handleTimerOpen(interaction);
     if (action === 'delete') return handleDelete(interaction);
+    if (action === 'delete-confirm') return handleDeleteConfirm(interaction);
+    if (action === 'delete-cancel') return handleDeleteCancel(interaction);
     return;
   }
   if (interaction.isUserSelectMenu() && interaction.customId === 'tempvc:trust-select') {
@@ -390,6 +406,26 @@ async function handleTransferSelect(interaction) {
   await interaction.update({ content: `♣️ **${newOwner.displayName}** is now the channel owner.`, components: [] });
 }
 
+// Lets anyone still in the channel take ownership once the recorded owner
+// has left, so the channel isn't permanently stuck with an absent owner.
+// Deliberately does NOT go through requireOwner() — that's the point.
+async function handleClaim(interaction) {
+  const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
+  if (error) return interaction.reply({ content: error, ...EPHEMERAL });
+
+  if (!isOwnerless(channel, tempData)) {
+    return interaction.reply({ content: 'The owner is still in the channel.', ...EPHEMERAL });
+  }
+
+  const oldOwnerId = tempData.ownerId;
+  tempData.ownerId = interaction.user.id;
+  storage.setTempChannel(voiceChannelId, tempData);
+  await updateOwnerPermissions(channel, oldOwnerId, interaction.user.id);
+  await refreshPanelMessage(channel, tempData);
+
+  await interaction.reply({ content: `👑 You are now the channel owner.`, ...EPHEMERAL });
+}
+
 async function handleTimerOpen(interaction) {
   const { error, tempData } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
@@ -431,14 +467,38 @@ async function handleTimerSelect(interaction) {
   await interaction.update({ content: savedReply(summary), components: [] });
 }
 
+// Delete no longer removes the channel immediately — it now opens a short
+// confirm/cancel prompt so a stray click on the danger-zone row can't take
+// out the whole channel by accident.
 async function handleDelete(interaction) {
-  const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
+  const { error, tempData } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
   const ownerErr = requireOwner(interaction, tempData);
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
-  await interaction.reply({ content: '➖ Channel deleted.', ...EPHEMERAL });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('tempvc:delete-confirm').setLabel('Yes, delete it').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('tempvc:delete-cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+  );
+  await interaction.reply({
+    content: '⚠️ This will permanently delete the channel. Are you sure?',
+    components: [row],
+    ...EPHEMERAL,
+  });
+}
+
+async function handleDeleteConfirm(interaction) {
+  const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
+  if (error) return interaction.update({ content: error, components: [] });
+  const ownerErr = requireOwner(interaction, tempData);
+  if (ownerErr) return interaction.update({ content: ownerErr, components: [] });
+
+  await interaction.update({ content: '➖ Channel deleted.', components: [] });
   await destroyTempChannel(channel.guild, channel, voiceChannelId, tempData);
+}
+
+async function handleDeleteCancel(interaction) {
+  await interaction.update({ content: 'Delete cancelled.', components: [] });
 }
 
 module.exports = { handlePanelInteraction };
