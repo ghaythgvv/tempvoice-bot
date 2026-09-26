@@ -2,16 +2,20 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const { iconForComponent, iconForText } = require('./customIcons');
 
 // Each entry: [lookup name for a custom app emoji, Unicode fallback]
+// Fallbacks were swapped from the flat grayscale-square set to icons that
+// still read semantically on their own if the custom app emoji ever fails
+// to load (e.g. lock -> 🔒 instead of a plain 🔳 square).
 const ICONS = {
-  lock: ['lock_unlock', '🔳'],
-  rename: ['rename', '▫️'],
-  limit: ['limit', '🔘'],
-  kick: ['kick', '✖️'],
-  emoji: ['change_emoji', '⚪'],
-  trust: ['trust', '🤍'],
-  untrust: ['untrust', '🖤'],
-  transfer: ['transfer', '♣️'],
-  delete: ['delete', '⬛'],
+  lock: ['lock_unlock', '🔒'],
+  rename: ['rename', '✏️'],
+  limit: ['limit', '👥'],
+  kick: ['kick', '🥾'],
+  emoji: ['change_emoji', '😀'],
+  trust: ['trust', '✅'],
+  untrust: ['untrust', '🚫'],
+  transfer: ['transfer', '👑'],
+  claim: ['claim', '👑'],
+  delete: ['delete', '🗑️'],
   timer: ['timer', '⏱️'],
 };
 
@@ -56,6 +60,10 @@ function buildStatusLine(tempData) {
 // footer. tempData is the same record stored in storage.js (locked, limit,
 // emoji, etc.) — both are optional so this still works if called with
 // nothing, though in practice voiceManager.js and panel.js always pass both.
+//
+// If ownerMember is missing but tempData still has an ownerId, the embed
+// says so explicitly instead of silently dropping the footer/thumbnail —
+// that's the "owner left, channel is claimable" state.
 function buildPanelEmbed(ownerMember, tempData = {}) {
   const embed = new EmbedBuilder()
     .setColor(PANEL_COLOR)
@@ -65,6 +73,8 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
   if (ownerMember) {
     embed.setThumbnail(ownerMember.displayAvatarURL({ size: 256 }));
     embed.setFooter({ text: `Owner: ${ownerMember.displayName}` });
+  } else if (tempData.ownerId) {
+    embed.setFooter({ text: 'Owner has left — use Claim Ownership to take over.' });
   }
 
   return embed;
@@ -80,7 +90,12 @@ function buildPanelAttachments() {
 // Grouped into Access / Settings / Danger zone, matching the panel embed's
 // simplified layout. Delete stays the only ButtonStyle.Danger so it still
 // stands out even within the danger-zone row.
-function buildPanelComponents() {
+//
+// ownerPresent (default true, for callers that don't pass it) swaps
+// "Transfer Ownership" for "Claim Ownership" once the recorded owner has
+// left the channel, so there's always a way to un-stick an ownerless
+// channel instead of every owner-only control going dead.
+function buildPanelComponents(ownerPresent = true) {
   const i = (key) => iconForComponent(...ICONS[key]);
 
   // Access
@@ -98,9 +113,13 @@ function buildPanelComponents() {
   );
 
   // Danger zone
+  const ownershipButton = ownerPresent
+    ? new ButtonBuilder().setCustomId('tempvc:transfer').setLabel('Transfer Ownership').setEmoji(i('transfer')).setStyle(ButtonStyle.Secondary)
+    : new ButtonBuilder().setCustomId('tempvc:claim').setLabel('Claim Ownership').setEmoji(i('claim')).setStyle(ButtonStyle.Primary);
+
   const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('tempvc:kick').setLabel('Kick').setEmoji(i('kick')).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('tempvc:transfer').setLabel('Transfer Ownership').setEmoji(i('transfer')).setStyle(ButtonStyle.Secondary)
+    ownershipButton
   );
   const row4 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('tempvc:timer').setLabel('Auto-Delete Timer').setEmoji(i('timer')).setStyle(ButtonStyle.Secondary),
