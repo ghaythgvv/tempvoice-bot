@@ -40,7 +40,7 @@ const PANEL_COLOR = 0x9b59b6;
 // later without hunting through the embed-building logic. The emoji tag is
 // deliberately concatenated OUTSIDE bold() — see textStyle.js's warning
 // about bold() corrupting the digits inside a <:name:id> tag.
-const PANEL_TITLE_EMOJI = '<:elt:1553820832927846530>';
+const PANEL_TITLE_EMOJI = '<a:156218darkpurplesparklybutterfly:1553826933890879518>';
 
 // One compact status line instead of four separate rows — lock state,
 // limit, emoji, and the auto-delete timer, separated by middle dots.
