@@ -4,6 +4,7 @@ const { randomEmoji } = require('./emojiPalette');
 const { applyEmojiToMember, removeEmojiFromMember, stripEmojiPrefixes } = require('./nickname');
 const { buildPanelEmbed, buildPanelComponents, buildPanelAttachments } = require('./panelView');
 const { refreshDashboard } = require('./dashboard');
+const { bold } = require('./textStyle');
 
 const pendingDeletions = new Set(); // channelIds with a delete check already queued
 
@@ -143,7 +144,7 @@ async function createTempChannel(member, guild, config) {
   // here too — not just in nickname.js — is what stops that leftover emoji
   // from also leaking into the new channel's name and showing up doubled.
   const cleanDisplayName = stripEmojiPrefixes(member.displayName);
-  const baseName = (saved && saved.customName) || `${cleanDisplayName}'s Channel`;
+  const baseName = (saved && saved.customName) || bold(`${cleanDisplayName}'s Channel`);
   const channelName = sanitizeChannelName(`${emoji} ${baseName}`);
 
   let channel;
@@ -158,7 +159,7 @@ async function createTempChannel(member, guild, config) {
     console.warn(`[tempvc] rejected name "${channelName}" (${err.message}) — retrying with a plain fallback name`);
     try {
       channel = await guild.channels.create({
-        name: `${emoji} Channel`.slice(0, 100),
+        name: `${emoji} ${bold('Channel')}`.slice(0, 100),
         type: ChannelType.GuildVoice,
         parent: config.categoryId || null,
         userLimit: (saved && saved.limit) || 0,
