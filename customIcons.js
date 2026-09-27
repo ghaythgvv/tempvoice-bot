@@ -21,6 +21,7 @@ const FIXED_EMOJIS = {
   transfer: { id: '1553472893583888475', name: 'transfer' },
   timer: { id: '1553596332025974864', name: 'timer' },
   delete: { id: '1553472896398270574', name: 'delete' },
+  check: { id: '1553555472811040788', name: 'positivo' },
 };
 
 let cache = null; // Collection<id, ApplicationEmoji> | null until loaded
