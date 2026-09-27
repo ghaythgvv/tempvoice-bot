@@ -15,6 +15,7 @@ const storage = require('./storage');
 const { EMOJI_PALETTE } = require('./emojiPalette');
 const { CLEANUP_INTERVAL_OPTIONS } = require('./panelView');
 const { iconForText } = require('./customIcons');
+const { bold } = require('./textStyle');
 const { applyEmojiToMember, removeEmojiFromMember } = require('./nickname');
 const { updateOwnerPermissions, destroyTempChannel, refreshPanelMessage, snapshotOwnerSettings } = require('./voiceManager');
 
@@ -23,18 +24,20 @@ const EPHEMERAL = { flags: MessageFlags.Ephemeral };
 // One short line per setting instead of a single generic "Saved!" reused
 // everywhere — the owner sees exactly what carries over next time. Uses the
 // custom "check" icon (registered as "positivo" in customIcons.js's
-// FIXED_EMOJIS); falls back to plain ✅ if that ever goes missing.
+// FIXED_EMOJIS); falls back to plain ✅ if that ever goes missing. summary is
+// passed in already bold()'d by each caller since it often contains a mix of
+// fixed words and dynamic values (counts, names).
 function savedReply(summary) {
-  return `${iconForText('check', '✅')} **Saved** — ${summary}, and it'll carry over next time your channel gets recreated.`;
+  return `${iconForText('check', '✅')} ${bold('Saved')} — ${summary}, ${bold("and it'll carry over next time your channel gets recreated.")}`;
 }
 
 // Looks up the temp channel the invoking member is currently sitting in, if any.
 function getOwnedTempChannel(interaction) {
   const member = interaction.member;
   const voiceChannelId = member.voice?.channelId;
-  if (!voiceChannelId) return { error: "You need to be in a temp voice channel to do that." };
+  if (!voiceChannelId) return { error: bold("You need to be in a temp voice channel to do that.") };
   const tempData = storage.getTempChannel(voiceChannelId);
-  if (!tempData) return { error: "That voice channel isn't a temp channel." };
+  if (!tempData) return { error: bold("That voice channel isn't a temp channel.") };
   return { voiceChannelId, tempData, channel: member.voice.channel };
 }
 
@@ -44,7 +47,7 @@ function getOwnedTempChannel(interaction) {
 // action still requires them to actually BE that owner.
 function requireOwner(interaction, tempData) {
   if (tempData.ownerId !== interaction.user.id) {
-    return 'Only the channel owner can do that.';
+    return bold('Only the channel owner can do that.');
   }
   return null;
 }
@@ -56,13 +59,15 @@ function isOwnerless(channel, tempData) {
   return !channel.members.has(tempData.ownerId);
 }
 
-// Builds a select menu listing everyone currently in the channel except the owner.
+// Builds a select menu listing everyone currently in the channel except the
+// owner. Member display names are left un-bolded — they're the person's own
+// name, not fixed UI text.
 function buildMemberSelect(customId, placeholder, channel, excludeId) {
   const others = channel.members.filter((m) => m.id !== excludeId && !m.user.bot);
   if (others.size === 0) return null;
   const menu = new StringSelectMenuBuilder()
     .setCustomId(customId)
-    .setPlaceholder(placeholder)
+    .setPlaceholder(bold(placeholder))
     .addOptions(others.map((m) => ({ label: m.displayName, value: m.id })).slice(0, 25));
   return new ActionRowBuilder().addComponents(menu);
 }
@@ -75,7 +80,7 @@ async function handlePanelInteraction(interaction) {
     // stuck loading forever or crashes the bot — the user gets a clear,
     // ephemeral error instead.
     console.error(`[panel] unhandled error on ${interaction.customId}: ${err.stack || err.message}`);
-    const payload = { content: '⚠️ Something went wrong handling that — please try again.', components: [], ...EPHEMERAL };
+    const payload = { content: `⚠️ ${bold('Something went wrong handling that — please try again.')}`, components: [], ...EPHEMERAL };
     try {
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(payload).catch(() => {});
@@ -141,8 +146,8 @@ async function handleLock(interaction) {
   // instead of hardcoded Unicode, so this confirmation always matches what
   // the panel itself is showing.
   const summary = tempData.locked
-    ? `${iconForText('lock', '🔒')} channel locked`
-    : `${iconForText('unlock', '🔓')} channel unlocked`;
+    ? `${iconForText('lock', '🔒')} ${bold('channel locked')}`
+    : `${iconForText('unlock', '🔓')} ${bold('channel unlocked')}`;
   await interaction.reply({ content: savedReply(summary), ...EPHEMERAL });
 }
 
@@ -152,10 +157,10 @@ async function handleRenameOpen(interaction) {
   const ownerErr = requireOwner(interaction, tempData);
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
-  const modal = new ModalBuilder().setCustomId('tempvc:rename-modal').setTitle('Rename channel');
+  const modal = new ModalBuilder().setCustomId('tempvc:rename-modal').setTitle(bold('Rename channel'));
   const input = new TextInputBuilder()
     .setCustomId('name')
-    .setLabel('New channel name')
+    .setLabel(bold('New channel name'))
     .setStyle(TextInputStyle.Short)
     .setMaxLength(90)
     .setRequired(true);
@@ -174,7 +179,8 @@ async function handleRenameSubmit(interaction) {
   snapshotOwnerSettings(tempData);
   // Rename is per-channel, not carried over on recreation — so this uses
   // its own short confirmation rather than the shared savedReply() wording.
-  await interaction.reply({ content: `✏️ Renamed to **${finalName}**.`, ...EPHEMERAL });
+  // finalName itself (the user's own channel name) is left un-bolded.
+  await interaction.reply({ content: `✏️ ${bold('Renamed to')} **${finalName}**.`, ...EPHEMERAL });
 }
 
 async function handleLimitOpen(interaction) {
@@ -183,10 +189,10 @@ async function handleLimitOpen(interaction) {
   const ownerErr = requireOwner(interaction, tempData);
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
-  const modal = new ModalBuilder().setCustomId('tempvc:limit-modal').setTitle('Set member limit');
+  const modal = new ModalBuilder().setCustomId('tempvc:limit-modal').setTitle(bold('Set member limit'));
   const input = new TextInputBuilder()
     .setCustomId('limit')
-    .setLabel('Max members (0 = no limit, up to 99)')
+    .setLabel(bold('Max members (0 = no limit, up to 99)'))
     .setStyle(TextInputStyle.Short)
     .setMaxLength(2)
     .setRequired(true);
@@ -204,7 +210,7 @@ async function handleLimitSubmit(interaction) {
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
-  const summary = limit ? `limit set to **${limit}**` : 'limit removed';
+  const summary = limit ? bold(`limit set to ${limit}`) : bold('limit removed');
   await interaction.reply({ content: savedReply(summary), ...EPHEMERAL });
 }
 
@@ -224,6 +230,9 @@ async function handleEmojiOpen(interaction) {
   }
 
   const rows = chunks.map((chunk, i) => {
+    // Option labels are each emoji's own name (e.g. "Swan") — left as-is,
+    // same treatment as member display names, since they're descriptive
+    // content rather than fixed panel UI text.
     const options = chunk.map((e) => ({
       label: e.label,
       value: e.emoji,
@@ -231,13 +240,13 @@ async function handleEmojiOpen(interaction) {
     }));
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`tempvc:emoji-select-${i}`)
-      .setPlaceholder(chunks.length > 1 ? `Emoji Set ${i + 1}` : 'Choose an emoji')
+      .setPlaceholder(bold(chunks.length > 1 ? `Emoji Set ${i + 1}` : 'Choose an emoji'))
       .addOptions(options);
     return new ActionRowBuilder().addComponents(menu);
   });
 
   await interaction.reply({
-    content: "Choose a new emoji — it'll update the channel and everyone in it:",
+    content: bold("Choose a new emoji — it'll update the channel and everyone in it:"),
     components: rows,
     ...EPHEMERAL,
   });
@@ -251,7 +260,7 @@ async function handleEmojiChange(interaction) {
 
   const newEmoji = interaction.values[0];
   if (newEmoji === tempData.emoji) {
-    return interaction.update({ content: `Already using ${newEmoji}.`, components: [] });
+    return interaction.update({ content: `${bold('Already using')} ${newEmoji}.`, components: [] });
   }
 
   const nameParts = channel.name.split(' ');
@@ -269,7 +278,7 @@ async function handleEmojiChange(interaction) {
   storage.setUserEmoji(tempData.ownerId, newEmoji); // remembered for next time they create a channel
   await refreshPanelMessage(channel, tempData);
 
-  await interaction.update({ content: savedReply(`emoji set to ${newEmoji}`), components: [] });
+  await interaction.update({ content: savedReply(`${bold('emoji set to')} ${newEmoji}`), components: [] });
 }
 
 async function handleKickOpen(interaction) {
@@ -279,8 +288,8 @@ async function handleKickOpen(interaction) {
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
   const row = buildMemberSelect('tempvc:kick-select', 'Choose who to disconnect', channel, tempData.ownerId);
-  if (!row) return interaction.reply({ content: "There's no one else in the channel to kick.", ...EPHEMERAL });
-  await interaction.reply({ content: 'Choose who to disconnect from the channel:', components: [row], ...EPHEMERAL });
+  if (!row) return interaction.reply({ content: bold("There's no one else in the channel to kick."), ...EPHEMERAL });
+  await interaction.reply({ content: bold('Choose who to disconnect from the channel:'), components: [row], ...EPHEMERAL });
 }
 
 async function handleKickSelect(interaction) {
@@ -290,9 +299,9 @@ async function handleKickSelect(interaction) {
   if (ownerErr) return interaction.update({ content: ownerErr, components: [] });
 
   const target = channel.members.get(interaction.values[0]);
-  if (!target) return interaction.update({ content: 'They already left.', components: [] });
+  if (!target) return interaction.update({ content: bold('They already left.'), components: [] });
   await target.voice.disconnect().catch(() => {});
-  await interaction.update({ content: `✖️ Disconnected **${target.displayName}**.`, components: [] });
+  await interaction.update({ content: `✖️ ${bold('Disconnected')} **${target.displayName}**.`, components: [] });
 }
 
 async function handleTrustOpen(interaction) {
@@ -303,11 +312,11 @@ async function handleTrustOpen(interaction) {
 
   const menu = new UserSelectMenuBuilder()
     .setCustomId('tempvc:trust-select')
-    .setPlaceholder('Choose who to trust')
+    .setPlaceholder(bold('Choose who to trust'))
     .setMinValues(1)
     .setMaxValues(25);
   await interaction.reply({
-    content: 'Choose who can join even while the channel is locked:',
+    content: bold('Choose who can join even while the channel is locked:'),
     components: [new ActionRowBuilder().addComponents(menu)],
     ...EPHEMERAL,
   });
@@ -332,7 +341,7 @@ async function handleTrustSelect(interaction) {
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
   const count = interaction.values.length;
-  const summary = count === 1 ? '1 member trusted' : `${count} members trusted`;
+  const summary = count === 1 ? bold('1 member trusted') : bold(`${count} members trusted`);
   await interaction.update({ content: savedReply(summary), components: [] });
 }
 
@@ -344,7 +353,7 @@ async function handleUntrustOpen(interaction) {
 
   const trustedIds = tempData.trusted || [];
   if (trustedIds.length === 0) {
-    return interaction.reply({ content: "No one's trusted right now.", ...EPHEMERAL });
+    return interaction.reply({ content: bold("No one's trusted right now."), ...EPHEMERAL });
   }
   const options = trustedIds.slice(0, 25).map((id) => {
     const m = channel.guild.members.cache.get(id);
@@ -352,12 +361,12 @@ async function handleUntrustOpen(interaction) {
   });
   const menu = new StringSelectMenuBuilder()
     .setCustomId('tempvc:untrust-select')
-    .setPlaceholder('Choose who to untrust')
+    .setPlaceholder(bold('Choose who to untrust'))
     .setMinValues(1)
     .setMaxValues(options.length)
     .addOptions(options);
   await interaction.reply({
-    content: 'Choose who to remove from the trusted list:',
+    content: bold('Choose who to remove from the trusted list:'),
     components: [new ActionRowBuilder().addComponents(menu)],
     ...EPHEMERAL,
   });
@@ -379,7 +388,7 @@ async function handleUntrustSelect(interaction) {
   );
   await refreshPanelMessage(channel, tempData);
   const count = targetIds.size;
-  const summary = count === 1 ? '1 member untrusted' : `${count} members untrusted`;
+  const summary = count === 1 ? bold('1 member untrusted') : bold(`${count} members untrusted`);
   await interaction.update({ content: savedReply(summary), components: [] });
 }
 
@@ -390,8 +399,8 @@ async function handleTransferOpen(interaction) {
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
   const row = buildMemberSelect('tempvc:transfer-select', 'Choose the new owner', channel, tempData.ownerId);
-  if (!row) return interaction.reply({ content: "There's no one else in the channel to hand it to.", ...EPHEMERAL });
-  await interaction.reply({ content: 'Choose who to hand ownership to:', components: [row], ...EPHEMERAL });
+  if (!row) return interaction.reply({ content: bold("There's no one else in the channel to hand it to."), ...EPHEMERAL });
+  await interaction.reply({ content: bold('Choose who to hand ownership to:'), components: [row], ...EPHEMERAL });
 }
 
 async function handleTransferSelect(interaction) {
@@ -401,7 +410,7 @@ async function handleTransferSelect(interaction) {
   if (ownerErr) return interaction.update({ content: ownerErr, components: [] });
 
   const newOwner = channel.members.get(interaction.values[0]);
-  if (!newOwner) return interaction.update({ content: 'They already left.', components: [] });
+  if (!newOwner) return interaction.update({ content: bold('They already left.'), components: [] });
 
   const oldOwnerId = tempData.ownerId;
   tempData.ownerId = newOwner.id;
@@ -411,7 +420,7 @@ async function handleTransferSelect(interaction) {
 
   // Ownership transfer isn't part of the owner-settings snapshot, so it
   // gets its own confirmation rather than savedReply().
-  await interaction.update({ content: `♣️ **${newOwner.displayName}** is now the channel owner.`, components: [] });
+  await interaction.update({ content: `♣️ **${newOwner.displayName}** ${bold('is now the channel owner.')}`, components: [] });
 }
 
 // Lets anyone still in the channel take ownership once the recorded owner
@@ -422,7 +431,7 @@ async function handleClaim(interaction) {
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
 
   if (!isOwnerless(channel, tempData)) {
-    return interaction.reply({ content: 'The owner is still in the channel.', ...EPHEMERAL });
+    return interaction.reply({ content: bold('The owner is still in the channel.'), ...EPHEMERAL });
   }
 
   const oldOwnerId = tempData.ownerId;
@@ -431,7 +440,7 @@ async function handleClaim(interaction) {
   await updateOwnerPermissions(channel, oldOwnerId, interaction.user.id);
   await refreshPanelMessage(channel, tempData);
 
-  await interaction.reply({ content: `👑 You are now the channel owner.`, ...EPHEMERAL });
+  await interaction.reply({ content: `👑 ${bold('You are now the channel owner.')}`, ...EPHEMERAL });
 }
 
 async function handleTimerOpen(interaction) {
@@ -443,7 +452,7 @@ async function handleTimerOpen(interaction) {
   const currentMinutes = typeof tempData.cleanupIntervalMinutes === 'number' ? tempData.cleanupIntervalMinutes : 10;
   const menu = new StringSelectMenuBuilder()
     .setCustomId('tempvc:timer-select')
-    .setPlaceholder('Choose how often to auto-delete messages')
+    .setPlaceholder(bold('Choose how often to auto-delete messages'))
     .addOptions(
       CLEANUP_INTERVAL_OPTIONS.map((opt) => ({
         label: opt.label,
@@ -452,7 +461,7 @@ async function handleTimerOpen(interaction) {
       }))
     );
   await interaction.reply({
-    content: 'Automatically clear this channel\'s chat on a schedule (the panel is never deleted):',
+    content: bold("Automatically clear this channel's chat on a schedule (the panel is never deleted):"),
     components: [new ActionRowBuilder().addComponents(menu)],
     ...EPHEMERAL,
   });
@@ -471,7 +480,7 @@ async function handleTimerSelect(interaction) {
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
 
-  const summary = minutes ? `auto-delete set to every **${minutes}m**` : 'auto-delete turned **off**';
+  const summary = minutes ? bold(`auto-delete set to every ${minutes}m`) : bold('auto-delete turned off');
   await interaction.update({ content: savedReply(summary), components: [] });
 }
 
@@ -485,11 +494,11 @@ async function handleDelete(interaction) {
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('tempvc:delete-confirm').setLabel('Yes, delete it').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('tempvc:delete-cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('tempvc:delete-confirm').setLabel(bold('Yes, delete it')).setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('tempvc:delete-cancel').setLabel(bold('Cancel')).setStyle(ButtonStyle.Secondary)
   );
   await interaction.reply({
-    content: '⚠️ This will permanently delete the channel. Are you sure?',
+    content: `⚠️ ${bold('This will permanently delete the channel. Are you sure?')}`,
     components: [row],
     ...EPHEMERAL,
   });
@@ -501,12 +510,12 @@ async function handleDeleteConfirm(interaction) {
   const ownerErr = requireOwner(interaction, tempData);
   if (ownerErr) return interaction.update({ content: ownerErr, components: [] });
 
-  await interaction.update({ content: '➖ Channel deleted.', components: [] });
+  await interaction.update({ content: `➖ ${bold('Channel deleted.')}`, components: [] });
   await destroyTempChannel(channel.guild, channel, voiceChannelId, tempData);
 }
 
 async function handleDeleteCancel(interaction) {
-  await interaction.update({ content: 'Delete cancelled.', components: [] });
+  await interaction.update({ content: bold('Delete cancelled.'), components: [] });
 }
 
 module.exports = { handlePanelInteraction };
