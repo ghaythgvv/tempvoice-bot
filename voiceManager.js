@@ -29,6 +29,13 @@ function getChannelLeadingEmoji(channel) {
   return match ? match[0] : null;
 }
 
+// True once no real person is left in the channel — bots (music bots,
+// etc.) don't count, so a channel with nothing but a bot sitting in it is
+// still treated as empty instead of being kept alive forever.
+function hasNoHumans(channel) {
+  return !channel.members.some((m) => !m.user.bot);
+}
+
 // Discord's channel-name validation rejects a few things that easily slip
 // into a name built from someone's raw display name: repeated whitespace,
 // leading/trailing whitespace, and it enforces a 100-character cap. This
@@ -179,23 +186,41 @@ async function createTempChannel(member, guild, config) {
   };
   storage.setTempChannel(channel.id, tempDataRecord);
 
+  // Move the member in RIGHT AWAY — this is the step the person is actually
+  // sitting there waiting on. Everything below (owner permission overwrite,
+  // lock/trusted overwrites, posting the panel) used to run and get awaited
+  // BEFORE this move, which is what made create→move feel slow. None of
+  // that setup needs to happen before the move: a bot-issued
+  // member.voice.setChannel() doesn't require the target to already have
+  // Connect permission, so it's safe to move first and finish setup after.
+  try {
+    await member.voice.setChannel(channel);
+  } catch (err) {
+    console.warn(`[tempvc] could not move ${member.user.tag} into their new channel: ${err.message}`);
+    await channel.delete().catch(() => {});
+    storage.deleteTempChannel(channel.id);
+    return;
+  }
+
   await updateOwnerPermissions(channel, null, member.id);
 
-  // Restore the locked state and re-grant anyone who was trusted before —
-  // do this before anyone (including the owner) actually joins.
+  // Restore the locked state and re-grant anyone who was trusted before.
+  // These run in parallel since neither depends on the other, and neither
+  // blocks the move above anymore.
+  const setupTasks = [];
   if (saved && saved.locked) {
-    await channel.permissionOverwrites.edit(guild.roles.everyone, { Connect: false }).catch(() => {});
+    setupTasks.push(
+      channel.permissionOverwrites.edit(guild.roles.everyone, { Connect: false }).catch(() => {})
+    );
   }
   if (saved && saved.trusted && saved.trusted.length) {
-    // Grant every trusted user's permission at once instead of waiting on
-    // each one sequentially — meaningfully faster for anyone with a long
-    // trusted list, with no downside since they don't depend on each other.
-    await Promise.all(
-      saved.trusted.map((userId) =>
+    setupTasks.push(
+      ...saved.trusted.map((userId) =>
         channel.permissionOverwrites.edit(userId, { Connect: true }).catch(() => {})
       )
     );
   }
+  if (setupTasks.length) await Promise.all(setupTasks);
 
   // Post the control panel right in this channel's own chat, so it's there
   // the moment anyone opens it — no need to go find a shared panel channel.
@@ -211,14 +236,6 @@ async function createTempChannel(member, guild, config) {
     storage.setTempChannel(channel.id, tempDataRecord);
   } catch (err) {
     console.warn(`[tempvc] could not post the panel in ${channel.name}: ${err.message}`);
-  }
-
-  try {
-    await member.voice.setChannel(channel);
-  } catch (err) {
-    console.warn(`[tempvc] could not move ${member.user.tag} into their new channel: ${err.message}`);
-    await channel.delete().catch(() => {});
-    storage.deleteTempChannel(channel.id);
   }
 
   await refreshDashboard(guild).catch(() => {});
@@ -252,7 +269,9 @@ function scheduleEmptyCheck(channelId, guild) {
       await refreshDashboard(guild).catch(() => {});
       return;
     }
-    if (channel.members.size === 0) {
+    // Bots (music bots, etc.) don't count as occupying the channel — a
+    // channel with nothing but a bot left in it still gets cleaned up.
+    if (hasNoHumans(channel)) {
       await destroyTempChannel(guild, channel, channelId, tempData);
     }
   });
@@ -261,7 +280,7 @@ function scheduleEmptyCheck(channelId, guild) {
 async function handleVoiceStateUpdate(oldState, newState) {
   const guild = newState.guild || oldState.guild;
   const member = newState.member || oldState.member;
-  if (!member || member.user.bot) return;
+  if (!member) return;
 
   const oldChannelId = oldState.channelId;
   const newChannelId = newState.channelId;
@@ -278,6 +297,9 @@ async function handleVoiceStateUpdate(oldState, newState) {
   // applying whatever emoji the destination calls for. Doing this in the
   // opposite order let a temp channel's leave-cleanup strip an emoji that
   // had just been applied a moment earlier by joining a static channel.
+  //
+  // Bots go through this same tracking now (music bots included) — only
+  // the join-to-create trigger further down stays human-only.
   if (oldTempData) {
     await onLeaveTracked(member, oldChannelId, guild);
   } else if (leftStaticChannel && !joinedStaticChannel) {
@@ -292,7 +314,9 @@ async function handleVoiceStateUpdate(oldState, newState) {
 
   if (!config) return;
 
-  if (newChannelId === config.joinToCreateId) {
+  // Bot-only guard: a music bot wandering into (or being moved to) the
+  // join-to-create channel shouldn't spawn a temp channel of its own.
+  if (newChannelId === config.joinToCreateId && !member.user.bot) {
     await createTempChannel(member, guild, config);
     return;
   }
@@ -320,7 +344,9 @@ async function sweepEmptyChannels(client) {
       await refreshDashboard(guild).catch(() => {});
       continue;
     }
-    if (channel.members.size === 0) {
+    // Same bot-blind emptiness check as scheduleEmptyCheck — a channel with
+    // only a music bot left in it counts as empty here too.
+    if (hasNoHumans(channel)) {
       await destroyTempChannel(guild, channel, channelId, data);
     }
   }
