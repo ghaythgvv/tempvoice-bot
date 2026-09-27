@@ -95,9 +95,20 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
 
   const embed = new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle(`${PANEL_TITLE_EMOJI} ${bold('ELT CONTROLE PANEL')}`)
     .setDescription(
-      [buildStatusLine(tempData), '', ownerLine, '', bold('Owner-only controls below.')].join('\n')
+      [
+        // Custom (server) emoji only render as images inside an embed's
+        // description/field values — embed TITLES can't display them, they
+        // just show the raw <:name:id> text. So the heading lives here
+        // instead of in .setTitle(), even though it reads like a title.
+        `${PANEL_TITLE_EMOJI} ${bold('ELT CONTROLE PANEL')}`,
+        '',
+        buildStatusLine(tempData),
+        '',
+        ownerLine,
+        '',
+        bold('Owner-only controls below.'),
+      ].join('\n')
     );
 
   if (ownerMember) {
