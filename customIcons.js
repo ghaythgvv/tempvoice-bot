@@ -11,7 +11,7 @@
 // match whatever the emoji is actually called in its source server.
 const FIXED_EMOJIS = {
   lock: { id: '1553472894976393246', name: 'lock' },
-  unlock: { id: '1553483080998588456', name: 'unlock' },
+  unlock: { id: 1553483080998588456', name: 'unlock' },
   trust: { id: '1553472890601734325', name: 'trust' },
   untrust: { id: '1553472897757224980', name: 'untrust' },
   rename: { id: '1553472888906977300', name: '1000035568_purple_glow' },
