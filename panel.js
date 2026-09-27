@@ -172,16 +172,22 @@ async function handleRenameSubmit(interaction) {
   const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
   const newName = interaction.fields.getTextInputValue('name');
-  const finalName = `${tempData.emoji} ${newName}`.slice(0, 100);
+  // Style the name itself with the same bold Unicode text used everywhere
+  // else in the panel — not just the confirmation message below. bold()
+  // only touches plain ASCII letters/digits, so this is safe to run once
+  // and store; running it again later on an already-styled name is a no-op
+  // since the styled characters aren't in the A-Za-z0-9 range anymore.
+  const styledName = bold(newName);
+  const finalName = `${tempData.emoji} ${styledName}`.slice(0, 100);
   await channel.setName(finalName);
-  tempData.customName = newName;
+  // Persisted in its styled form so the next channel this owner creates
+  // starts with the same look, without needing to re-style it there too.
+  tempData.customName = styledName;
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   // Rename is per-channel, not carried over on recreation — so this uses
   // its own short confirmation rather than the shared savedReply() wording.
-  // Uses the custom "rename" icon instead of a hardcoded pencil, and bolds
-  // the whole message (including the new name) with the same Unicode style
-  // as everything else in the panel.
+  // Uses the custom "rename" icon instead of a hardcoded pencil.
   await interaction.reply({
     content: `${iconForText('rename', '✏️')} ${bold(`Renamed to ${finalName}`)}.`,
     ...EPHEMERAL,
