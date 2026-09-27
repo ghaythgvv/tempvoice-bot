@@ -114,7 +114,7 @@ async function refreshPanelMessage(channel, tempData) {
       try {
         message = await channel.send({
           embeds: [buildPanelEmbed(ownerMember, tempData)],
-          components: buildPanelComponents(),
+          components: buildPanelComponents(!!ownerMember, !!tempData.locked),
           files: buildPanelAttachments(),
         });
         tempData.panelMessageId = message.id;
@@ -126,7 +126,7 @@ async function refreshPanelMessage(channel, tempData) {
     }
     await message.edit({
       embeds: [buildPanelEmbed(ownerMember, tempData)],
-      components: buildPanelComponents(),
+      components: buildPanelComponents(!!ownerMember, !!tempData.locked),
       files: buildPanelAttachments(),
     });
   } catch (err) {
@@ -229,7 +229,7 @@ async function createTempChannel(member, guild, config) {
   try {
     const panelMessage = await channel.send({
       embeds: [buildPanelEmbed(member, tempDataRecord)],
-      components: buildPanelComponents(),
+      components: buildPanelComponents(true, tempDataRecord.locked),
       files: buildPanelAttachments(),
     });
     tempDataRecord.panelMessageId = panelMessage.id;
