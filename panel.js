@@ -179,8 +179,13 @@ async function handleRenameSubmit(interaction) {
   snapshotOwnerSettings(tempData);
   // Rename is per-channel, not carried over on recreation — so this uses
   // its own short confirmation rather than the shared savedReply() wording.
-  // finalName itself (the user's own channel name) is left un-bolded.
-  await interaction.reply({ content: `✏️ ${bold('Renamed to')} **${finalName}**.`, ...EPHEMERAL });
+  // Uses the custom "rename" icon instead of a hardcoded pencil, and bolds
+  // the whole message (including the new name) with the same Unicode style
+  // as everything else in the panel.
+  await interaction.reply({
+    content: `${iconForText('rename', '✏️')} ${bold(`Renamed to ${finalName}`)}.`,
+    ...EPHEMERAL,
+  });
 }
 
 async function handleLimitOpen(interaction) {
