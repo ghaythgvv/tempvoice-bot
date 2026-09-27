@@ -35,6 +35,13 @@ const CLEANUP_INTERVAL_OPTIONS = [
 // Purple theme for the panel embed.
 const PANEL_COLOR = 0x9b59b6;
 
+// The panel's custom title emoji + text. Kept as its own constant (rather
+// than inlined in buildPanelEmbed) so it's easy to swap the emoji again
+// later without hunting through the embed-building logic. The emoji tag is
+// deliberately concatenated OUTSIDE bold() — see textStyle.js's warning
+// about bold() corrupting the digits inside a <:name:id> tag.
+const PANEL_TITLE_EMOJI = '<:elt:1553820832927846530>';
+
 // One compact status line instead of four separate rows — lock state,
 // limit, emoji, and the auto-delete timer, separated by middle dots.
 //
@@ -88,7 +95,7 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
 
   const embed = new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle(`🎛️ ${bold('Channel panel')}`)
+    .setTitle(`${PANEL_TITLE_EMOJI} ${bold('ELT CONTROLE PANEL')}`)
     .setDescription(
       [buildStatusLine(tempData), '', ownerLine, '', bold('Owner-only controls below.')].join('\n')
     );
