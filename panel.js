@@ -14,15 +14,18 @@ const {
 const storage = require('./storage');
 const { EMOJI_PALETTE } = require('./emojiPalette');
 const { CLEANUP_INTERVAL_OPTIONS } = require('./panelView');
+const { iconForText } = require('./customIcons');
 const { applyEmojiToMember, removeEmojiFromMember } = require('./nickname');
 const { updateOwnerPermissions, destroyTempChannel, refreshPanelMessage, snapshotOwnerSettings } = require('./voiceManager');
 
 const EPHEMERAL = { flags: MessageFlags.Ephemeral };
 
 // One short line per setting instead of a single generic "Saved!" reused
-// everywhere — the owner sees exactly what carries over next time.
+// everywhere — the owner sees exactly what carries over next time. Uses the
+// custom "check" icon (registered as "positivo" in customIcons.js's
+// FIXED_EMOJIS); falls back to plain ✅ if that ever goes missing.
 function savedReply(summary) {
-  return `✅ **Saved** — ${summary}, and it'll carry over next time your channel gets recreated.`;
+  return `${iconForText('check', '✅')} **Saved** — ${summary}, and it'll carry over next time your channel gets recreated.`;
 }
 
 // Looks up the temp channel the invoking member is currently sitting in, if any.
@@ -134,7 +137,12 @@ async function handleLock(interaction) {
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
-  const summary = tempData.locked ? '🔒 channel locked' : '🔓 channel unlocked';
+  // Uses the same custom lock/unlock icons as the panel button/status line
+  // instead of hardcoded Unicode, so this confirmation always matches what
+  // the panel itself is showing.
+  const summary = tempData.locked
+    ? `${iconForText('lock', '🔒')} channel locked`
+    : `${iconForText('unlock', '🔓')} channel unlocked`;
   await interaction.reply({ content: savedReply(summary), ...EPHEMERAL });
 }
 
