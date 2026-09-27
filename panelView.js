@@ -6,7 +6,8 @@ const { iconForComponent, iconForText } = require('./customIcons');
 // still read semantically on their own if the custom app emoji ever fails
 // to load (e.g. lock -> 🔒 instead of a plain 🔳 square).
 const ICONS = {
-  lock: ['lock_unlock', '🔒'],
+  lock: ['lock', '🔒'],
+  unlock: ['unlock', '🔓'],
   rename: ['rename', '✏️'],
   limit: ['limit', '👥'],
   kick: ['kick', '🥾'],
@@ -36,7 +37,7 @@ const PANEL_COLOR = 0x9b59b6;
 // limit, emoji, and the auto-delete timer, separated by middle dots.
 function buildStatusLine(tempData) {
   const i = (key) => iconForText(...ICONS[key]);
-  const lockPart = tempData.locked ? `${i('lock')} Locked` : `${i('lock')} Unlocked`;
+  const lockPart = tempData.locked ? `${i('lock')} Locked` : `${i('unlock')} Unlocked`;
   const limitPart = tempData.limit ? `Limit **${tempData.limit}**` : 'No limit';
   const emojiPart = `Emoji ${tempData.emoji || 'none'}`;
 
@@ -56,23 +57,32 @@ function buildStatusLine(tempData) {
   return [lockPart, limitPart, emojiPart, timerPart].join('  •  ');
 }
 
-// ownerMember is a discord.js GuildMember, used for the avatar thumbnail and
-// footer. tempData is the same record stored in storage.js (locked, limit,
-// emoji, etc.) — both are optional so this still works if called with
+// ownerMember is a discord.js GuildMember, used for the avatar thumbnail.
+// tempData is the same record stored in storage.js (locked, limit, emoji,
+// ownerId, etc.) — both are optional so this still works if called with
 // nothing, though in practice voiceManager.js and panel.js always pass both.
 //
+// The owner is shown as a real <@id> mention in the embed body rather than
+// plain text in the footer — Discord doesn't render footer text as a
+// clickable mention, but it does render mentions inside the embed
+// description, and mentions inside embeds never trigger a ping
+// notification, so this is safe to re-render on every settings change.
+//
 // If ownerMember is missing but tempData still has an ownerId, the embed
-// says so explicitly instead of silently dropping the footer/thumbnail —
-// that's the "owner left, channel is claimable" state.
+// says so explicitly instead of silently dropping the thumbnail — that's
+// the "owner left, channel is claimable" state.
 function buildPanelEmbed(ownerMember, tempData = {}) {
+  const ownerLine = tempData.ownerId ? `Owner: <@${tempData.ownerId}>` : 'Owner: unknown';
+
   const embed = new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle('🎛️ Channel panel')
-    .setDescription([buildStatusLine(tempData), '', 'Owner-only controls below.'].join('\n'));
+    .setDescription(
+      [buildStatusLine(tempData), '', ownerLine, '', 'Owner-only controls below.'].join('\n')
+    );
 
   if (ownerMember) {
     embed.setThumbnail(ownerMember.displayAvatarURL({ size: 256 }));
-    embed.setFooter({ text: `Owner: ${ownerMember.displayName}` });
   } else if (tempData.ownerId) {
     embed.setFooter({ text: 'Owner has left — use Claim Ownership to take over.' });
   }
@@ -95,12 +105,17 @@ function buildPanelAttachments() {
 // "Transfer Ownership" for "Claim Ownership" once the recorded owner has
 // left the channel, so there's always a way to un-stick an ownerless
 // channel instead of every owner-only control going dead.
-function buildPanelComponents(ownerPresent = true) {
+//
+// locked (default false) picks which of the two distinct lock/unlock icons
+// shows on the Lock/Unlock button itself, matching whatever the status
+// line above already says.
+function buildPanelComponents(ownerPresent = true, locked = false) {
   const i = (key) => iconForComponent(...ICONS[key]);
+  const lockIcon = locked ? i('lock') : i('unlock');
 
   // Access
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('tempvc:lock').setLabel('Lock / Unlock').setEmoji(i('lock')).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('tempvc:lock').setLabel('Lock / Unlock').setEmoji(lockIcon).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('tempvc:trust').setLabel('Trust').setEmoji(i('trust')).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('tempvc:untrust').setLabel('Untrust').setEmoji(i('untrust')).setStyle(ButtonStyle.Secondary)
   );
