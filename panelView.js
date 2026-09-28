@@ -1,10 +1,4 @@
- const path = require('path');
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
-
-// Panel banner. Put your banner file next to this file and change the name
-// here if it's not banner.png (e.g. banner.gif, banner.jpg).
-const BANNER_FILE = 'banner.gif';
-const BANNER_PATH = path.join(__dirname, BANNER_FILE);
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { iconForComponent, iconForText } = require('./customIcons');
 const { bold } = require('./textStyle');
 
@@ -47,6 +41,7 @@ const PANEL_COLOR = 0x9b59b6;
 // deliberately concatenated OUTSIDE bold() — see textStyle.js's warning
 // about bold() corrupting the digits inside a <:name:id> tag.
 const PANEL_TITLE_EMOJI = '<a:156218darkpurplesparklybutterfly:1553826933890879518>';
+const OWNER_LINE_EMOJI = '<:owner:1554186011809021953>';
 
 // One compact status line instead of four separate rows — lock state,
 // limit, emoji, and the auto-delete timer, separated by middle dots.
@@ -96,8 +91,8 @@ function buildStatusLine(tempData) {
 // the "owner left, channel is claimable" state.
 function buildPanelEmbed(ownerMember, tempData = {}) {
   const ownerLine = tempData.ownerId
-    ? `${bold('Owner:')} <@${tempData.ownerId}>`
-    : bold('Owner: unknown');
+    ? `${OWNER_LINE_EMOJI} ${bold('Owner:')} <@${tempData.ownerId}>`
+    : `${OWNER_LINE_EMOJI} ${bold('Owner: unknown')}`;
 
   const embed = new EmbedBuilder()
     .setColor(PANEL_COLOR)
@@ -117,8 +112,6 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
       ].join('\n')
     );
 
-  embed.setImage(`attachment://${BANNER_FILE}`);
-
   if (ownerMember) {
     embed.setThumbnail(ownerMember.displayAvatarURL({ size: 256 }));
   } else if (tempData.ownerId) {
@@ -128,11 +121,11 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
   return embed;
 }
 
-// The banner is uploaded with the panel message and referenced from the embed
-// via attachment://. Every send/edit of the panel must pass
-// `files: buildPanelAttachments()` or the image disappears on refresh.
+// No banner image right now — kept as a function (returning nothing) so any
+// `files: buildPanelAttachments()` calls elsewhere keep working unchanged if
+// an image gets added back later.
 function buildPanelAttachments() {
-  return [new AttachmentBuilder(BANNER_PATH, { name: BANNER_FILE })];
+  return [];
 }
 
 // Grouped into Access / Settings / Danger zone, matching the panel embed's
