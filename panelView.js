@@ -129,8 +129,8 @@ function buildPanelAttachments() {
 }
 
 // Grouped into Access / Settings / Danger zone, matching the panel embed's
-// simplified layout. Delete stays the only ButtonStyle.Danger so it still
-// stands out even within the danger-zone row. Every label runs through
+// simplified layout. Delete is the only ButtonStyle.Success (green) button
+// so it still stands out within the last row. Every label runs through
 // bold() since button labels are plain text — Discord doesn't apply ** **
 // markdown to them.
 //
@@ -171,7 +171,7 @@ function buildPanelComponents(ownerPresent = true, locked = false) {
   );
   const row4 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('tempvc:timer').setLabel(bold('Auto-Delete Timer')).setEmoji(i('timer')).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('tempvc:delete').setLabel(bold('Delete')).setEmoji(i('delete')).setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId('tempvc:delete').setLabel(bold('Delete')).setEmoji(i('delete')).setStyle(ButtonStyle.Success)
   );
 
   return [row1, row2, row3, row4];
