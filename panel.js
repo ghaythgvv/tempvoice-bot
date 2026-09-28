@@ -91,6 +91,7 @@ async function routeInteraction(interaction) {
     if (action === 'rename') return handleRenameOpen(interaction);
     if (action === 'limit') return handleLimitOpen(interaction);
     if (action === 'emoji') return handleEmojiOpen(interaction);
+    if (action === 'emoji-page') return handleEmojiPage(interaction);
     if (action === 'kick') return handleKickOpen(interaction);
     if (action === 'trust') return handleTrustOpen(interaction);
     if (action === 'untrust') return handleUntrustOpen(interaction);
@@ -217,38 +218,67 @@ async function handleLimitSubmit(interaction) {
   await interaction.reply({ content: savedReply(summary), ...EPHEMERAL });
 }
 
+// The emoji picker is ONE select menu (Discord allows max 25 options per
+// menu) with Back / Next buttons to flip through the rest of the palette.
+const EMOJI_PAGE_SIZE = 25;
+const EMOJI_PICKER_TEXT = bold("Choose a new emoji — it'll update the channel and everyone in it:");
+
+function buildEmojiPicker(page) {
+  const totalPages = Math.max(1, Math.ceil(EMOJI_PALETTE.length / EMOJI_PAGE_SIZE));
+  const p = Math.min(Math.max(0, page), totalPages - 1);
+  const slice = EMOJI_PALETTE.slice(p * EMOJI_PAGE_SIZE, (p + 1) * EMOJI_PAGE_SIZE);
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('tempvc:emoji-select')
+    .setPlaceholder(bold(`Choose an emoji (${p + 1}/${totalPages})`))
+    .addOptions(slice.map((e) => ({ label: e.label, value: e.emoji, emoji: e.emoji })));
+  const rows = [new ActionRowBuilder().addComponents(menu)];
+
+  if (totalPages > 1) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`tempvc:emoji-page:${p - 1}`)
+          .setLabel(bold('Back'))
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(p === 0),
+        new ButtonBuilder()
+          .setCustomId('tempvc:emoji-page-info')
+          .setLabel(`${p + 1}/${totalPages}`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(`tempvc:emoji-page:${p + 1}`)
+          .setLabel(bold('Next'))
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(p >= totalPages - 1)
+      )
+    );
+  }
+  return rows;
+}
+
 async function handleEmojiOpen(interaction) {
   const { error, tempData } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
   const ownerErr = requireOwner(interaction, tempData);
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
-  // Discord caps a select menu at 25 options, so the palette is split across
-  // several menus (max 5 action rows per message).
-  const CHUNK_SIZE = 25;
-  const chunks = [];
-  for (let i = 0; i < EMOJI_PALETTE.length; i += CHUNK_SIZE) {
-    chunks.push(EMOJI_PALETTE.slice(i, i + CHUNK_SIZE));
-  }
-
-  const rows = chunks.map((chunk, i) => {
-    const options = chunk.map((e) => ({
-      label: e.label,
-      value: e.emoji,
-      emoji: e.emoji,
-    }));
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId(`tempvc:emoji-select-${i}`)
-      .setPlaceholder(bold(chunks.length > 1 ? `Emoji Set ${i + 1}` : 'Choose an emoji'))
-      .addOptions(options);
-    return new ActionRowBuilder().addComponents(menu);
-  });
-
   await interaction.reply({
-    content: bold("Choose a new emoji — it'll update the channel and everyone in it:"),
-    components: rows,
+    content: EMOJI_PICKER_TEXT,
+    components: buildEmojiPicker(0),
     ...EPHEMERAL,
   });
+}
+
+async function handleEmojiPage(interaction) {
+  const { error, tempData } = getOwnedTempChannel(interaction);
+  if (error) return interaction.update({ content: error, components: [] });
+  const ownerErr = requireOwner(interaction, tempData);
+  if (ownerErr) return interaction.update({ content: ownerErr, components: [] });
+
+  const page = parseInt(interaction.customId.split(':')[2], 10) || 0;
+  await interaction.update({ content: EMOJI_PICKER_TEXT, components: buildEmojiPicker(page) });
 }
 
 // FIXED: answers Discord right away (renaming the channel and every nickname
