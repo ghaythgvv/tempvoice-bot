@@ -16,17 +16,19 @@ const { EMOJI_PALETTE } = require('./emojiPalette');
 const { CLEANUP_INTERVAL_OPTIONS } = require('./panelView');
 const { iconForText } = require('./customIcons');
 const { bold } = require('./textStyle');
-const { applyEmojiToMember, removeEmojiFromMember } = require('./nickname');
-const { updateOwnerPermissions, destroyTempChannel, refreshPanelMessage, snapshotOwnerSettings } = require('./voiceManager');
+const { stripEmojiPrefixes } = require('./nickname');
+const {
+  updateOwnerPermissions,
+  destroyTempChannel,
+  refreshPanelMessage,
+  snapshotOwnerSettings,
+  syncChannelMembers,
+} = require('./voiceManager');
 
 const EPHEMERAL = { flags: MessageFlags.Ephemeral };
 
 // One short line per setting instead of a single generic "Saved!" reused
-// everywhere — the owner sees exactly what carries over next time. Uses the
-// custom "check" icon (registered as "positivo" in customIcons.js's
-// FIXED_EMOJIS); falls back to plain ✅ if that ever goes missing. summary is
-// passed in already bold()'d by each caller since it often contains a mix of
-// fixed words and dynamic values (counts, names).
+// everywhere — the owner sees exactly what carries over next time.
 function savedReply(summary) {
   return `${iconForText('check', '✅')} ${bold('Saved')} — ${summary}, ${bold("and it'll carry over next time your channel gets recreated.")}`;
 }
@@ -41,10 +43,6 @@ function getOwnedTempChannel(interaction) {
   return { voiceChannelId, tempData, channel: member.voice.channel };
 }
 
-// Owner check that now also unlocks the claim path: if the recorded owner
-// has left the channel, anyone still inside is allowed to press Claim
-// (handled separately in handleClaim) even though every other owner-only
-// action still requires them to actually BE that owner.
 function requireOwner(interaction, tempData) {
   if (tempData.ownerId !== interaction.user.id) {
     return bold('Only the channel owner can do that.');
@@ -52,16 +50,12 @@ function requireOwner(interaction, tempData) {
   return null;
 }
 
-// True once the recorded owner is no longer sitting in the channel — used
-// to gate the Claim button/flow and to decide whether panelView should show
-// "Transfer Ownership" or "Claim Ownership".
+// True once the recorded owner is no longer sitting in the channel.
 function isOwnerless(channel, tempData) {
   return !channel.members.has(tempData.ownerId);
 }
 
-// Builds a select menu listing everyone currently in the channel except the
-// owner. Member display names are left un-bolded — they're the person's own
-// name, not fixed UI text.
+// Builds a select menu listing everyone currently in the channel except the owner.
 function buildMemberSelect(customId, placeholder, channel, excludeId) {
   const others = channel.members.filter((m) => m.id !== excludeId && !m.user.bot);
   if (others.size === 0) return null;
@@ -76,9 +70,6 @@ async function handlePanelInteraction(interaction) {
   try {
     await routeInteraction(interaction);
   } catch (err) {
-    // Catch-all so a bug in any single handler never leaves the button
-    // stuck loading forever or crashes the bot — the user gets a clear,
-    // ephemeral error instead.
     console.error(`[panel] unhandled error on ${interaction.customId}: ${err.stack || err.message}`);
     const payload = { content: `⚠️ ${bold('Something went wrong handling that — please try again.')}`, components: [], ...EPHEMERAL };
     try {
@@ -142,9 +133,6 @@ async function handleLock(interaction) {
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
-  // Uses the same custom lock/unlock icons as the panel button/status line
-  // instead of hardcoded Unicode, so this confirmation always matches what
-  // the panel itself is showing.
   const summary = tempData.locked
     ? `${iconForText('lock', '🔒')} ${bold('channel locked')}`
     : `${iconForText('unlock', '🔓')} ${bold('channel unlocked')}`;
@@ -168,29 +156,31 @@ async function handleRenameOpen(interaction) {
   await interaction.showModal(modal);
 }
 
+// FIXED: answers Discord right away (setName is rate-limited by Discord and
+// used to make the interaction fail), strips an emoji the user typed (it
+// showed up as a 2nd emoji in the channel name), and re-checks ownership.
 async function handleRenameSubmit(interaction) {
   const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
-  const newName = interaction.fields.getTextInputValue('name');
-  // Style the name itself with the same bold Unicode text used everywhere
-  // else in the panel — not just the confirmation message below. bold()
-  // only touches plain ASCII letters/digits, so this is safe to run once
-  // and store; running it again later on an already-styled name is a no-op
-  // since the styled characters aren't in the A-Za-z0-9 range anymore.
+  const ownerErr = requireOwner(interaction, tempData);
+  if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
+
+  await interaction.deferReply(EPHEMERAL);
+
+  const typed = interaction.fields.getTextInputValue('name').trim();
+  const newName = stripEmojiPrefixes(typed) || typed; // the emoji comes from the emoji picker
   const styledName = bold(newName);
   const finalName = `${tempData.emoji} ${styledName}`.slice(0, 100);
-  await channel.setName(finalName);
-  // Persisted in its styled form so the next channel this owner creates
-  // starts with the same look, without needing to re-style it there too.
+
   tempData.customName = styledName;
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
-  // Rename is per-channel, not carried over on recreation — so this uses
-  // its own short confirmation rather than the shared savedReply() wording.
-  // Uses the custom "rename" icon instead of a hardcoded pencil.
-  await interaction.reply({
+
+  // Not awaited: if Discord's rename rate limit is hit, the reply must not wait for it.
+  channel.setName(finalName).catch((err) => console.warn(`[panel] rename failed: ${err.message}`));
+
+  await interaction.editReply({
     content: `${iconForText('rename', '✏️')} ${bold(`Renamed to ${finalName}`)}.`,
-    ...EPHEMERAL,
   });
 }
 
@@ -214,6 +204,8 @@ async function handleLimitOpen(interaction) {
 async function handleLimitSubmit(interaction) {
   const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
+  const ownerErr = requireOwner(interaction, tempData);
+  if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
   const raw = interaction.fields.getTextInputValue('limit');
   const limit = Math.max(0, Math.min(99, parseInt(raw, 10) || 0));
   await channel.setUserLimit(limit);
@@ -231,9 +223,8 @@ async function handleEmojiOpen(interaction) {
   const ownerErr = requireOwner(interaction, tempData);
   if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
 
-  // Discord caps a select menu at 25 options. EMOJI_PALETTE has grown past
-  // that, so we split it across multiple menus (max 5 action rows per
-  // message, so up to 125 emoji fit) instead of truncating the list.
+  // Discord caps a select menu at 25 options, so the palette is split across
+  // several menus (max 5 action rows per message).
   const CHUNK_SIZE = 25;
   const chunks = [];
   for (let i = 0; i < EMOJI_PALETTE.length; i += CHUNK_SIZE) {
@@ -241,9 +232,6 @@ async function handleEmojiOpen(interaction) {
   }
 
   const rows = chunks.map((chunk, i) => {
-    // Option labels are each emoji's own name (e.g. "Swan") — left as-is,
-    // same treatment as member display names, since they're descriptive
-    // content rather than fixed panel UI text.
     const options = chunk.map((e) => ({
       label: e.label,
       value: e.emoji,
@@ -263,6 +251,11 @@ async function handleEmojiOpen(interaction) {
   });
 }
 
+// FIXED: answers Discord right away (renaming the channel and every nickname
+// used to take longer than the 3 seconds Discord allows), saves the new emoji
+// BEFORE syncing so every member is updated from the same source of truth,
+// updates everyone in parallel, and swaps the emoji in the channel name safely
+// even if the owner renamed the channel from Discord's own menu.
 async function handleEmojiChange(interaction) {
   const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
   if (error) return interaction.update({ content: error, components: [] });
@@ -274,22 +267,21 @@ async function handleEmojiChange(interaction) {
     return interaction.update({ content: `${bold('Already using')} ${newEmoji}.`, components: [] });
   }
 
-  const nameParts = channel.name.split(' ');
-  nameParts[0] = newEmoji;
-  await channel.setName(nameParts.join(' ').slice(0, 100));
-
-  // applyEmojiToMember strips whatever's already there before adding the new
-  // one, so this can't stack even if someone's mid-switch between channels.
-  for (const [, member] of channel.members) {
-    await applyEmojiToMember(member, newEmoji);
-  }
+  await interaction.deferUpdate();
 
   tempData.emoji = newEmoji;
   storage.setTempChannel(voiceChannelId, tempData);
   storage.setUserEmoji(tempData.ownerId, newEmoji); // remembered for next time they create a channel
+
+  const rest = stripEmojiPrefixes(channel.name) || bold('Channel');
+  channel.setName(`${newEmoji} ${rest}`.slice(0, 100)).catch((err) =>
+    console.warn(`[panel] channel emoji rename failed: ${err.message}`)
+  );
+
+  await syncChannelMembers(channel);
   await refreshPanelMessage(channel, tempData);
 
-  await interaction.update({ content: savedReply(`${bold('emoji set to')} ${newEmoji}`), components: [] });
+  await interaction.editReply({ content: savedReply(`${bold('emoji set to')} ${newEmoji}`), components: [] });
 }
 
 async function handleKickOpen(interaction) {
@@ -341,7 +333,6 @@ async function handleTrustSelect(interaction) {
 
   const trusted = new Set(tempData.trusted || []);
   for (const userId of interaction.values) trusted.add(userId);
-  // Grant everyone's permission in parallel instead of one at a time.
   await Promise.all(
     interaction.values.map((userId) =>
       channel.permissionOverwrites.edit(userId, { Connect: true }).catch(() => {})
@@ -393,7 +384,6 @@ async function handleUntrustSelect(interaction) {
   tempData.trusted = (tempData.trusted || []).filter((id) => !targetIds.has(id));
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
-  // Revoke everyone's permission in parallel instead of one at a time.
   await Promise.all(
     [...targetIds].map((targetId) => channel.permissionOverwrites.delete(targetId).catch(() => {}))
   );
@@ -429,14 +419,11 @@ async function handleTransferSelect(interaction) {
   await updateOwnerPermissions(channel, oldOwnerId, newOwner.id);
   await refreshPanelMessage(channel, tempData);
 
-  // Ownership transfer isn't part of the owner-settings snapshot, so it
-  // gets its own confirmation rather than savedReply().
   await interaction.update({ content: `♣️ **${newOwner.displayName}** ${bold('is now the channel owner.')}`, components: [] });
 }
 
 // Lets anyone still in the channel take ownership once the recorded owner
-// has left, so the channel isn't permanently stuck with an absent owner.
-// Deliberately does NOT go through requireOwner() — that's the point.
+// has left. Deliberately does NOT go through requireOwner() — that's the point.
 async function handleClaim(interaction) {
   const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
@@ -486,7 +473,7 @@ async function handleTimerSelect(interaction) {
 
   const minutes = parseInt(interaction.values[0], 10) || 0;
   tempData.cleanupIntervalMinutes = minutes;
-  tempData.lastPurgeAt = Date.now(); // restart the countdown from now, not from whenever it last ran
+  tempData.lastPurgeAt = Date.now();
   storage.setTempChannel(voiceChannelId, tempData);
   snapshotOwnerSettings(tempData);
   await refreshPanelMessage(channel, tempData);
@@ -495,9 +482,7 @@ async function handleTimerSelect(interaction) {
   await interaction.update({ content: savedReply(summary), components: [] });
 }
 
-// Delete no longer removes the channel immediately — it now opens a short
-// confirm/cancel prompt so a stray click on the danger-zone row can't take
-// out the whole channel by accident.
+// Delete opens a confirm/cancel prompt so a stray click can't remove the channel.
 async function handleDelete(interaction) {
   const { error, tempData } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
