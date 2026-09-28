@@ -13,30 +13,30 @@
 // Volume is attached to this service — when present, we write there instead,
 // so saved settings actually survive redeploys. Locally (no volume), it
 // falls back to a "data" folder next to this file, same as before.
- 
+
 const fs = require('fs');
 const path = require('path');
- 
+
 const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
- 
+
 if (!process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   console.warn(
     '[storage] No RAILWAY_VOLUME_MOUNT_PATH set — writing to a local folder that will NOT ' +
       'survive a redeploy on Railway. Attach a Volume to this service to fix that.'
   );
 }
- 
+
 const FILES = {
   userEmojis: path.join(DATA_DIR, 'userEmojis.json'),
   userSettings: path.join(DATA_DIR, 'userSettings.json'),
   tempChannels: path.join(DATA_DIR, 'tempChannels.json'),
   guildConfig: path.join(DATA_DIR, 'guildConfig.json'),
 };
- 
+
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
- 
+
 function load(file) {
   ensureDataDir();
   if (!fs.existsSync(file)) return {};
@@ -44,29 +44,40 @@ function load(file) {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     console.error(`Could not parse ${file}, starting fresh:`, err.message);
+    // Keep the unreadable file so the data can still be recovered by hand.
+    try {
+      fs.copyFileSync(file, `${file}.corrupt-${Date.now()}`);
+    } catch {
+      // Nothing more we can do.
+    }
     return {};
   }
 }
- 
+
+// Writes to a temporary file first and then renames it over the real one.
+// A rename is atomic, so if the bot crashes or is redeployed mid-save, the
+// old complete file is still there instead of a half-written, corrupt one.
 function save(file, data) {
   try {
     ensureDataDir();
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, file);
   } catch (err) {
     console.error(`ERROR: Could not save to ${file}: ${err.message}`);
     // Don't throw — let the bot continue; at worst a restart will lose this one change.
   }
 }
- 
+
 const cache = {
   userEmojis: load(FILES.userEmojis),
   userSettings: load(FILES.userSettings),
   tempChannels: load(FILES.tempChannels),
   guildConfig: load(FILES.guildConfig),
 };
- 
+
 console.log(`[storage] Using data directory: ${DATA_DIR}`);
- 
+
 module.exports = {
   // --- per-user emoji preference, so it comes back on the next channel they create ---
   getUserEmoji(userId) {
@@ -80,7 +91,7 @@ module.exports = {
     cache.userEmojis[userId] = emoji;
     save(FILES.userEmojis, cache.userEmojis);
   },
- 
+
   // --- per-user saved channel settings (name, limit, locked, trusted list) ---
   getUserSettings(userId) {
     return cache.userSettings[userId] || null;
@@ -93,7 +104,7 @@ module.exports = {
     cache.userSettings[userId] = { ...(cache.userSettings[userId] || {}), ...data };
     save(FILES.userSettings, cache.userSettings);
   },
- 
+
   // --- live temp channel state ---
   getTempChannel(channelId) {
     return cache.tempChannels[channelId] || null;
@@ -117,7 +128,7 @@ module.exports = {
     delete cache.tempChannels[channelId];
     save(FILES.tempChannels, cache.tempChannels);
   },
- 
+
   // --- per-guild setup (category / join-to-create channel) ---
   getGuildConfig(guildId) {
     return cache.guildConfig[guildId] || null;
