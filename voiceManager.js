@@ -1,16 +1,16 @@
-const { ChannelType } = require('discord.js');
+const { ChannelType, Events } = require('discord.js');
 const storage = require('./storage');
 const { randomEmoji } = require('./emojiPalette');
-const { applyEmojiToMember, removeEmojiFromMember, stripEmojiPrefixes } = require('./nickname');
+const { syncNickname, stripEmojiPrefixes, getLeadingEmoji } = require('./nickname');
 const { buildPanelEmbed, buildPanelComponents, buildPanelAttachments } = require('./panelView');
 const { refreshDashboard } = require('./dashboard');
 const { bold } = require('./textStyle');
 
 const pendingDeletions = new Set(); // channelIds with a delete check already queued
+const creatingFor = new Set(); // member ids whose temp channel is being created right now
 
 // Fixed (non-temp) voice channels that should still sync their emoji onto
-// anyone sitting in them, same as temp channels do — just for these two
-// specific static channels rather than every generated temp channel.
+// anyone sitting in them, same as temp channels do.
 const STATIC_EMOJI_SYNC_CHANNEL_IDS = new Set([
   '1517940974125318166',
   '1517941337700176003',
@@ -20,28 +20,102 @@ const STATIC_EMOJI_SYNC_CHANNEL_IDS = new Set([
   '1543346189276160241',
 ]);
 
-// Grabs whatever emoji the channel's own name starts with, so renaming the
-// channel automatically changes what gets applied — no separate config to
-// keep in sync. No trailing-space requirement here (channel names often
-// don't have one), unlike the nickname-prefix matcher in nickname.js.
-const LEADING_EMOJI_RE = /^\p{Extended_Pictographic}\uFE0F?/u;
+// The emoji a static channel's own name starts with (renaming the channel
+// changes what gets applied). Understands multi-part emoji like 🐈‍⬛.
 function getChannelLeadingEmoji(channel) {
-  const match = channel?.name?.match(LEADING_EMOJI_RE);
-  return match ? match[0] : null;
+  return getLeadingEmoji(channel?.name);
+}
+
+// ---------------------------------------------------------------------------
+// Emoji sync — ONE source of truth.
+//
+// Instead of reacting to individual events ("joined X -> add", "left Y ->
+// remove") in whatever order they happen to arrive, the emoji a member should
+// wear is always worked out from the channel they are in RIGHT NOW:
+//   in a temp channel      -> that channel's emoji
+//   in a static sync chan  -> that channel's leading emoji
+//   anywhere else          -> none
+// Whatever order events land in, the last sync always converges on the right
+// nickname, so there are no missing or doubled emoji.
+// ---------------------------------------------------------------------------
+
+function isSyncedChannelId(channelId) {
+  return !!channelId && (STATIC_EMOJI_SYNC_CHANNEL_IDS.has(channelId) || !!storage.getTempChannel(channelId));
+}
+
+// string = wear this emoji, null = not a synced channel (no emoji wanted),
+// undefined = synced channel but no emoji known (leave the nickname alone).
+function desiredEmojiForChannel(channel) {
+  if (!channel) return null;
+  const temp = storage.getTempChannel(channel.id);
+  if (temp) return temp.emoji || undefined;
+  if (STATIC_EMOJI_SYNC_CHANNEL_IDS.has(channel.id)) return getChannelLeadingEmoji(channel) || undefined;
+  return null;
+}
+
+// allowRemove=false: only ever ADD/fix an emoji, never strip one (used by the
+// nickname guard and the startup pass so a random person's own emoji is safe).
+function syncMemberEmoji(guild, memberId, { allowRemove = true } = {}) {
+  return syncNickname(guild, memberId, () => {
+    const channel = guild.voiceStates.cache.get(memberId)?.channel ?? null;
+    const wanted = desiredEmojiForChannel(channel);
+    if (wanted === null) return allowRemove ? null : undefined;
+    return wanted;
+  }).catch((err) => {
+    console.warn(`[nickname] sync failed for ${memberId}: ${err.message}`);
+    return false;
+  });
+}
+
+// Re-syncs everyone currently in a channel (used when a channel's emoji changes).
+async function syncChannelMembers(channel) {
+  await Promise.all(
+    [...channel.members.keys()].map((id) => syncMemberEmoji(channel.guild, id, { allowRemove: false }))
+  );
+}
+
+// Fixes people who joined while the bot was offline/redeploying.
+async function syncAllVoiceMembers(client) {
+  for (const guild of client.guilds.cache.values()) {
+    const ids = [];
+    for (const [userId, vs] of guild.voiceStates.cache) {
+      if (vs.channelId && isSyncedChannelId(vs.channelId)) ids.push(userId);
+    }
+    await Promise.all(ids.map((id) => syncMemberEmoji(guild, id, { allowRemove: false })));
+  }
+}
+
+// Gives the emoji back when someone removes or edits it while sitting in a
+// synced channel. Debounced, and idempotent: the bot's own rename fires this
+// event too, but by then the nickname is already correct so nothing is sent.
+let nicknameGuardRegistered = false;
+const guardTimers = new Map();
+function registerNicknameGuard(client) {
+  if (nicknameGuardRegistered) return;
+  nicknameGuardRegistered = true;
+  client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+    if (oldMember.nickname === newMember.nickname) return; // not a nickname change
+    if (!isSyncedChannelId(newMember.voice?.channelId)) return;
+    const key = `${newMember.guild.id}:${newMember.id}`;
+    clearTimeout(guardTimers.get(key));
+    guardTimers.set(
+      key,
+      setTimeout(() => {
+        guardTimers.delete(key);
+        syncMemberEmoji(newMember.guild, newMember.id, { allowRemove: false });
+      }, 1500)
+    );
+  });
 }
 
 // True once no real person is left in the channel — bots (music bots,
-// etc.) don't count, so a channel with nothing but a bot sitting in it is
-// still treated as empty instead of being kept alive forever.
+// etc.) don't count.
 function hasNoHumans(channel) {
   return !channel.members.some((m) => !m.user.bot);
 }
 
-// Discord's channel-name validation rejects a few things that easily slip
-// into a name built from someone's raw display name: repeated whitespace,
-// leading/trailing whitespace, and it enforces a 100-character cap. This
-// keeps the generated name inside those rules instead of finding out via a
-// failed API call.
+// Keeps generated channel names inside Discord's rules (no repeated / outer
+// whitespace, 100-character cap).
 function sanitizeChannelName(name) {
   return name
     .replace(/\s+/g, ' ')
@@ -49,10 +123,7 @@ function sanitizeChannelName(name) {
     .slice(0, 100);
 }
 
-// Extra permissions the channel owner gets on their own channel, on top of
-// whatever the panel buttons already let them do — mainly so they can also
-// use Discord's own right-click menu to move/mute/deafen people in it, and
-// so locking the channel can never lock the owner out of their own channel.
+// Extra permissions the channel owner gets on their own channel.
 const OWNER_CHANNEL_PERMISSIONS = {
   ManageChannels: true,
   Connect: true,
@@ -73,7 +144,6 @@ async function updateOwnerPermissions(channel, oldOwnerId, newOwnerId) {
 
 // Saves the channel's current name/limit/locked/trusted state under its
 // owner, so the next channel that owner creates can start off the same way.
-// Called right before a temp channel is torn down, wherever that happens.
 function snapshotOwnerSettings(tempData) {
   if (!tempData || !tempData.ownerId) return;
   storage.setUserSettings(tempData.ownerId, {
@@ -86,9 +156,7 @@ function snapshotOwnerSettings(tempData) {
   });
 }
 
-// The one place a temp channel actually gets deleted — snapshots the
-// owner's settings first, then clears the live record, then removes the
-// Discord channel itself.
+// The one place a temp channel actually gets deleted.
 async function destroyTempChannel(guild, channel, channelId, tempData) {
   snapshotOwnerSettings(tempData);
   storage.deleteTempChannel(channelId);
@@ -98,33 +166,44 @@ async function destroyTempChannel(guild, channel, channelId, tempData) {
   await refreshDashboard(guild).catch(() => {});
 }
 
-// Re-renders the panel embed/buttons in place after a setting changes
-// (lock state, limit, emoji, owner, etc.) so the status lines shown to the
-// owner never go stale. Safe to call even if the panel message was somehow
-// deleted — it just quietly does nothing.
+// Re-renders the panel embed/buttons in place after a setting changes.
 async function refreshPanelMessage(channel, tempData) {
   if (!tempData || !tempData.panelMessageId) return;
   try {
     const ownerMember = await channel.guild.members.fetch(tempData.ownerId).catch(() => null);
-    let message = await channel.messages.fetch(tempData.panelMessageId).catch(() => null);
-    if (!message) {
-      // Self-healing: the panel message is gone (deleted by accident, wiped
-      // by a bug, whatever) — repost a fresh one instead of leaving the
-      // channel without any controls at all.
+
+    // Only treat the panel as gone when Discord says "Unknown Message"
+    // (10008). Any other error (rate limit, network blip) used to make the
+    // bot think the panel was deleted and post a DUPLICATE panel.
+    let message = null;
+    let panelGone = false;
+    try {
+      message = await channel.messages.fetch(tempData.panelMessageId);
+    } catch (err) {
+      if (err.code === 10008) {
+        panelGone = true;
+      } else {
+        console.warn(`[tempvc] could not fetch panel message in ${channel.name}: ${err.message}`);
+        return;
+      }
+    }
+
+    if (panelGone) {
       console.warn(`[tempvc] panel message missing in ${channel.name} — reposting a new one`);
       try {
-        message = await channel.send({
+        const fresh = await channel.send({
           embeds: [buildPanelEmbed(ownerMember, tempData)],
           components: buildPanelComponents(!!ownerMember, !!tempData.locked),
           files: buildPanelAttachments(),
         });
-        tempData.panelMessageId = message.id;
+        tempData.panelMessageId = fresh.id;
         storage.setTempChannel(channel.id, tempData);
       } catch (err) {
         console.warn(`[tempvc] could not repost missing panel in ${channel.name}: ${err.message}`);
       }
       return;
     }
+
     await message.edit({
       embeds: [buildPanelEmbed(ownerMember, tempData)],
       components: buildPanelComponents(!!ownerMember, !!tempData.locked),
@@ -135,14 +214,22 @@ async function refreshPanelMessage(channel, tempData) {
   }
 }
 
+// Wrapper so one person can never create two channels at once (e.g. by
+// bouncing in and out of the join-to-create channel).
 async function createTempChannel(member, guild, config) {
+  if (creatingFor.has(member.id)) return;
+  creatingFor.add(member.id);
+  try {
+    await createTempChannelInner(member, guild, config);
+  } finally {
+    creatingFor.delete(member.id);
+  }
+}
+
+async function createTempChannelInner(member, guild, config) {
   const emoji = storage.getUserEmoji(member.id) || randomEmoji();
   const saved = storage.getUserSettings(member.id);
-  // member.displayName can still have a stuck emoji prefix on it if an
-  // earlier nickname edit failed (e.g. the bot's role sits below this
-  // member's role, so Discord silently rejected the rename). Stripping it
-  // here too — not just in nickname.js — is what stops that leftover emoji
-  // from also leaking into the new channel's name and showing up doubled.
+  // Strip any stuck emoji prefix so it can't leak into the channel name.
   const cleanDisplayName = stripEmojiPrefixes(member.displayName);
   const baseName = (saved && saved.customName) || bold(`${cleanDisplayName}'s Channel`);
   const channelName = sanitizeChannelName(`${emoji} ${baseName}`);
@@ -178,8 +265,6 @@ async function createTempChannel(member, guild, config) {
     limit: (saved && saved.limit) || 0,
     locked: !!(saved && saved.locked),
     trusted: (saved && saved.trusted) || [],
-    // Defaults to 10 minutes unless the owner has changed it before and it
-    // got carried over via their saved profile.
     cleanupIntervalMinutes:
       saved && typeof saved.cleanupIntervalMinutes === 'number' ? saved.cleanupIntervalMinutes : 10,
     lastPurgeAt: Date.now(),
@@ -187,13 +272,7 @@ async function createTempChannel(member, guild, config) {
   };
   storage.setTempChannel(channel.id, tempDataRecord);
 
-  // Move the member in RIGHT AWAY — this is the step the person is actually
-  // sitting there waiting on. Everything below (owner permission overwrite,
-  // lock/trusted overwrites, posting the panel) used to run and get awaited
-  // BEFORE this move, which is what made create→move feel slow. None of
-  // that setup needs to happen before the move: a bot-issued
-  // member.voice.setChannel() doesn't require the target to already have
-  // Connect permission, so it's safe to move first and finish setup after.
+  // Move the member in RIGHT AWAY; the rest of the setup happens after.
   try {
     await member.voice.setChannel(channel);
   } catch (err) {
@@ -205,9 +284,6 @@ async function createTempChannel(member, guild, config) {
 
   await updateOwnerPermissions(channel, null, member.id);
 
-  // Restore the locked state and re-grant anyone who was trusted before.
-  // These run in parallel since neither depends on the other, and neither
-  // blocks the move above anymore.
   const setupTasks = [];
   if (saved && saved.locked) {
     setupTasks.push(
@@ -223,10 +299,6 @@ async function createTempChannel(member, guild, config) {
   }
   if (setupTasks.length) await Promise.all(setupTasks);
 
-  // Post the control panel right in this channel's own chat, so it's there
-  // the moment anyone opens it — no need to go find a shared panel channel.
-  // The message id gets saved so later setting changes (lock, limit, emoji,
-  // transfer) can refresh this same message's status lines in place.
   try {
     const panelMessage = await channel.send({
       embeds: [buildPanelEmbed(member, tempDataRecord)],
@@ -242,21 +314,8 @@ async function createTempChannel(member, guild, config) {
   await refreshDashboard(guild).catch(() => {});
 }
 
-async function onJoinTracked(member, tempData) {
-  await applyEmojiToMember(member, tempData.emoji);
-}
-
-async function onLeaveTracked(member, channelId, guild) {
-  await removeEmojiFromMember(member);
-  scheduleEmptyCheck(channelId, guild);
-}
-
 // Checks (and deletes) an empty channel as soon as the current event-loop
-// tick clears, instead of waiting on a fixed timer. That still lets any
-// voice state update that's already in flight (e.g. someone else moving
-// into this same channel right as the last person leaves) get applied
-// first, so an about-to-be-occupied channel doesn't get deleted out from
-// under them — it just doesn't add unnecessary extra delay on top of that.
+// tick clears, so an in-flight voice update gets applied first.
 function scheduleEmptyCheck(channelId, guild) {
   if (pendingDeletions.has(channelId)) return;
   pendingDeletions.add(channelId);
@@ -270,8 +329,6 @@ function scheduleEmptyCheck(channelId, guild) {
       await refreshDashboard(guild).catch(() => {});
       return;
     }
-    // Bots (music bots, etc.) don't count as occupying the channel — a
-    // channel with nothing but a bot left in it still gets cleaned up.
     if (hasNoHumans(channel)) {
       await destroyTempChannel(guild, channel, channelId, tempData);
     }
@@ -285,53 +342,37 @@ async function handleVoiceStateUpdate(oldState, newState) {
 
   const oldChannelId = oldState.channelId;
   const newChannelId = newState.channelId;
-  if (oldChannelId === newChannelId) return;
+  if (oldChannelId === newChannelId) return; // mute/deafen/stream changes etc.
 
-  const joinedStaticChannel = newChannelId && STATIC_EMOJI_SYNC_CHANNEL_IDS.has(newChannelId);
-  const leftStaticChannel = oldChannelId && STATIC_EMOJI_SYNC_CHANNEL_IDS.has(oldChannelId);
+  // Work out, before any await, whether this move involves a channel whose
+  // emoji we manage. A channel that no longer exists (just deleted) counts —
+  // that's how a bot left behind in a deleted temp channel gets cleaned up.
+  const oldTempData = oldChannelId ? storage.getTempChannel(oldChannelId) : null;
+  const oldWasSynced =
+    !!oldTempData ||
+    (!!oldChannelId && (STATIC_EMOJI_SYNC_CHANNEL_IDS.has(oldChannelId) || !guild.channels.cache.has(oldChannelId)));
 
   const config = storage.getGuildConfig(guild.id);
-  const oldTempData = oldChannelId ? storage.getTempChannel(oldChannelId) : null;
+  const isCreateTrigger = !!config && newChannelId === config.joinToCreateId && !member.user.bot;
 
-  // Always resolve any "leaving" cleanup FIRST — whether that's a temp
-  // channel's own emoji tracking or a static synced channel — before
-  // applying whatever emoji the destination calls for. Doing this in the
-  // opposite order let a temp channel's leave-cleanup strip an emoji that
-  // had just been applied a moment earlier by joining a static channel.
-  //
-  // Bots go through this same tracking now (music bots included) — only
-  // the join-to-create trigger further down stays human-only.
-  if (oldTempData) {
-    await onLeaveTracked(member, oldChannelId, guild);
-  } else if (leftStaticChannel && !joinedStaticChannel) {
-    await removeEmojiFromMember(member);
-  }
+  // Start the empty-channel check first so deleting the channel never waits
+  // on a nickname API call.
+  if (oldTempData) scheduleEmptyCheck(oldChannelId, guild);
 
-  if (joinedStaticChannel) {
-    const channel = guild.channels.cache.get(newChannelId);
-    const emoji = getChannelLeadingEmoji(channel);
-    if (emoji) await applyEmojiToMember(member, emoji);
-  }
-
-  if (!config) return;
-
-  // Bot-only guard: a music bot wandering into (or being moved to) the
-  // join-to-create channel shouldn't spawn a temp channel of its own.
-  if (newChannelId === config.joinToCreateId && !member.user.bot) {
+  if (isCreateTrigger) {
     await createTempChannel(member, guild, config);
+    // If creation succeeded this is a no-op (the move into the new channel
+    // has its own event); if it failed, this removes the old channel's emoji.
+    if (oldWasSynced) await syncMemberEmoji(guild, member.id);
     return;
   }
 
-  if (newChannelId) {
-    const newTempData = storage.getTempChannel(newChannelId);
-    if (newTempData) {
-      await onJoinTracked(member, newTempData);
-    }
+  if (oldWasSynced || isSyncedChannelId(newChannelId)) {
+    await syncMemberEmoji(guild, member.id);
   }
 }
 
-// Deletes any tracked channel that's empty right now. Used on a timer and at
-// startup so the bot cleans up properly even after a restart or brief outage.
+// Deletes any tracked channel that's empty right now.
 async function sweepEmptyChannels(client) {
   const all = storage.getAllTempChannels();
   for (const channelId of Object.keys(all)) {
@@ -345,8 +386,8 @@ async function sweepEmptyChannels(client) {
       await refreshDashboard(guild).catch(() => {});
       continue;
     }
-    // Same bot-blind emptiness check as scheduleEmptyCheck — a channel with
-    // only a music bot left in it counts as empty here too.
+    // A channel created seconds ago may not have its owner inside yet.
+    if (Date.now() - (data.createdAt || 0) < 30_000) continue;
     if (hasNoHumans(channel)) {
       await destroyTempChannel(guild, channel, channelId, data);
     }
@@ -355,24 +396,18 @@ async function sweepEmptyChannels(client) {
 
 async function reconcileOnStartup(client) {
   await sweepEmptyChannels(client);
+  registerNicknameGuard(client);
+  await syncAllVoiceMembers(client).catch((err) => console.warn(`[nickname] startup sync failed: ${err.message}`));
   startPeriodicCleanup(client);
 }
 
-// Wipes every message in a temp channel's text chat except the panel itself,
-// so the chat doesn't fill up with clutter over time.
+// Wipes every message in a temp channel's text chat except the panel itself.
 async function purgeChannelMessages(channel, tempData) {
-  // Without a known panel message id, we can't safely tell the panel apart
-  // from anything else — skip this channel rather than risk deleting it.
-  // This only affects channels created before panelMessageId existed; any
-  // channel created from now on will always have one.
   if (!tempData || !tempData.panelMessageId) {
     console.warn(`[cleanup] skipping ${channel.name} — no known panel message id`);
     return;
   }
   try {
-    // fetch({ limit: 100 }) only ever returns one page — a channel with more
-    // than 100 messages needs repeated passes to actually get emptied out.
-    // Loop until a fetch comes back with nothing left to delete.
     let totalDeleted = 0;
     while (true) {
       const messages = await channel.messages.fetch({ limit: 100 });
@@ -383,23 +418,15 @@ async function purgeChannelMessages(channel, tempData) {
         await toDelete.first().delete().catch(() => {});
         totalDeleted += 1;
       } else {
-        // Discord's bulk delete refuses messages older than 14 days; passing
-        // `true` here tells discord.js to silently skip those instead of
-        // throwing and aborting the whole batch.
         const deleted = await channel.bulkDelete(toDelete, true).catch((err) => {
           console.warn(`[cleanup] bulkDelete failed in ${channel.name}: ${err.message}`);
           return null;
         });
-        if (!deleted) break; // avoid looping forever on a repeated failure
+        if (!deleted) break;
         totalDeleted += deleted.size;
-        // bulkDelete silently skips messages older than 14 days rather than
-        // deleting them — if none of this batch was actually removable,
-        // stop instead of re-fetching the same stuck messages forever.
         if (deleted.size === 0) break;
       }
 
-      // If this fetch returned fewer than the full page, there's nothing
-      // more to page through.
       if (messages.size < 100) break;
     }
     if (totalDeleted > 0) {
@@ -415,8 +442,6 @@ async function purgeAllTempChannels(client) {
   const now = Date.now();
   for (const channelId of Object.keys(all)) {
     const data = all[channelId];
-    // 0 (or missing, for very old records) means auto-delete is off for
-    // this channel — skip it entirely rather than defaulting it on.
     const intervalMinutes = data.cleanupIntervalMinutes;
     if (!intervalMinutes) continue;
 
@@ -431,18 +456,15 @@ async function purgeAllTempChannels(client) {
     await purgeChannelMessages(channel, data);
     data.lastPurgeAt = now;
     storage.setTempChannel(channelId, data);
-    await refreshPanelMessage(channel, data); // updates the countdown to the next run
+    await refreshPanelMessage(channel, data);
   }
 }
 
-// Checked every minute rather than run on a single fixed timer, so each
-// channel's own interval (5 min, 30 min, 1 hour, etc.) is respected
-// independently instead of everyone sharing one global schedule.
 const CLEANUP_CHECK_INTERVAL_MS = 60 * 1000;
 let cleanupIntervalStarted = false;
 
 function startPeriodicCleanup(client) {
-  if (cleanupIntervalStarted) return; // guard against double-registration on reconnect
+  if (cleanupIntervalStarted) return;
   cleanupIntervalStarted = true;
   setInterval(() => {
     purgeAllTempChannels(client).catch((err) => console.warn(`[cleanup] sweep failed: ${err.message}`));
@@ -458,4 +480,6 @@ module.exports = {
   destroyTempChannel,
   refreshPanelMessage,
   snapshotOwnerSettings,
+  syncMemberEmoji,
+  syncChannelMembers,
 };
