@@ -35,6 +35,11 @@ const CLEANUP_INTERVAL_OPTIONS = [
 // Purple theme for the panel embed.
 const PANEL_COLOR = 0x9b59b6;
 
+// Banner shown at the bottom of the panel embed. It's the banner.gif from the
+// repo, loaded through GitHub's raw link so it also survives panel edits
+// (no attachment re-upload needed). Set to '' to hide the banner.
+const PANEL_BANNER_URL = 'https://raw.githubusercontent.com/ghaythgvv/tempvoice-bot/main/banner.gif';
+
 // The panel's custom title emoji + text. Kept as its own constant (rather
 // than inlined in buildPanelEmbed) so it's easy to swap the emoji again
 // later without hunting through the embed-building logic. The emoji tag is
@@ -102,7 +107,7 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
         // description/field values — embed TITLES can't display them, they
         // just show the raw <:name:id> text. So the heading lives here
         // instead of in .setTitle(), even though it reads like a title.
-        `${PANEL_TITLE_EMOJI} ${bold('ELT CONTROLE PANEL')}`,
+        `${PANEL_TITLE_EMOJI} ${bold('ELT CONTROL PANEL')}`,
         '',
         buildStatusLine(tempData),
         '',
@@ -111,6 +116,8 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
         bold('Owner-only controls below.'),
       ].join('\n')
     );
+
+  if (PANEL_BANNER_URL) embed.setImage(PANEL_BANNER_URL);
 
   if (ownerMember) {
     embed.setThumbnail(ownerMember.displayAvatarURL({ size: 256 }));
@@ -121,7 +128,7 @@ function buildPanelEmbed(ownerMember, tempData = {}) {
   return embed;
 }
 
-// No banner image right now — kept as a function (returning nothing) so any
+// The banner now comes from PANEL_BANNER_URL, so no file attachment is needed — kept as a function (returning nothing) so any
 // `files: buildPanelAttachments()` calls elsewhere keep working unchanged if
 // an image gets added back later.
 function buildPanelAttachments() {
