@@ -171,9 +171,12 @@ function buildPanelComponents(ownerPresent = true, locked = false) {
     ? new ButtonBuilder().setCustomId('tempvc:transfer').setLabel(bold('Transfer Ownership')).setEmoji(i('transfer')).setStyle(ButtonStyle.Secondary)
     : new ButtonBuilder().setCustomId('tempvc:claim').setLabel(bold('Claim Ownership')).setEmoji(i('claim')).setStyle(ButtonStyle.Primary);
 
+  // The 18+ button has no icon on purpose: the only built-in 18+ emoji (🔞) renders
+  // red in Discord, which clashes with the white/purple icon set.
   const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('tempvc:kick').setLabel(bold('Kick')).setEmoji(i('kick')).setStyle(ButtonStyle.Secondary),
-    ownershipButton
+    ownershipButton,
+    new ButtonBuilder().setCustomId('tempvc:age').setLabel(bold('18+')).setStyle(ButtonStyle.Secondary)
   );
   const row4 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('tempvc:timer').setLabel(bold('Auto-Delete Timer')).setEmoji(i('timer')).setStyle(ButtonStyle.Secondary),
