@@ -98,6 +98,7 @@ async function routeInteraction(interaction) {
     if (action === 'transfer') return handleTransferOpen(interaction);
     if (action === 'claim') return handleClaim(interaction);
     if (action === 'timer') return handleTimerOpen(interaction);
+    if (action === 'age') return handleAge(interaction);
     if (action === 'delete') return handleDelete(interaction);
     if (action === 'delete-confirm') return handleDeleteConfirm(interaction);
     if (action === 'delete-cancel') return handleDeleteCancel(interaction);
@@ -138,6 +139,36 @@ async function handleLock(interaction) {
     ? `${iconForText('lock', '🔒')} ${bold('channel locked')}`
     : `${iconForText('unlock', '🔓')} ${bold('channel unlocked')}`;
   await interaction.reply({ content: savedReply(summary), ...EPHEMERAL });
+}
+
+// 18+ button: renames the channel to "18+". Press it again and the old name comes back.
+async function handleAge(interaction) {
+  const { error, tempData, channel, voiceChannelId } = getOwnedTempChannel(interaction);
+  if (error) return interaction.reply({ content: error, ...EPHEMERAL });
+  const ownerErr = requireOwner(interaction, tempData);
+  if (ownerErr) return interaction.reply({ content: ownerErr, ...EPHEMERAL });
+
+  await interaction.deferReply(EPHEMERAL);
+
+  const AGE_NAME = bold('18+');
+  const currentName = stripEmojiPrefixes(channel.name);
+  let newName;
+  if (currentName === AGE_NAME) {
+    newName = tempData.nameBefore18 || bold('Channel'); // already 18+ -> put the old name back
+  } else {
+    tempData.nameBefore18 = currentName;
+    newName = AGE_NAME;
+  }
+  tempData.customName = newName;
+  const finalName = `${tempData.emoji} ${newName}`.slice(0, 100);
+
+  storage.setTempChannel(voiceChannelId, tempData);
+  snapshotOwnerSettings(tempData);
+
+  // Not awaited, same as Rename: Discord limits how often a channel can be renamed.
+  channel.setName(finalName).catch((err) => console.warn(`[panel] 18+ rename failed: ${err.message}`));
+
+  await interaction.editReply({ content: savedReply(bold(`channel renamed to ${finalName}`)) });
 }
 
 async function handleRenameOpen(interaction) {
