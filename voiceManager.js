@@ -125,7 +125,6 @@ function sanitizeChannelName(name) {
 
 // Extra permissions the channel owner gets on their own channel.
 const OWNER_CHANNEL_PERMISSIONS = {
-  ManageChannels: true,
   Connect: true,
 };
 
