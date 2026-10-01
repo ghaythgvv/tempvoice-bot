@@ -1,19 +1,25 @@
-// dashboard.js — ELITE Temp Voice Stats (Components V2)
-// Server-wide "how busy is the temp-vc system" view. Lives in its own channel
-// and refreshes itself. Requires discord.js >= 14.19.
-//
-// NOTE: a Components V2 message can't have `content` or `embeds`.
+// dashboard.js — ELITE Temp Voice Stats v2 (Components V2)
+// Requires discord.js >= 14.19. Optional: put banner.gif next to this file
+// and it shows at the top of the card.
 
+const fs = require('fs');
+const path = require('path');
 const {
   ContainerBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
   SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+  AttachmentBuilder,
   MessageFlags,
 } = require('discord.js');
 const storage = require('./storage');
 
 const ACCENT = 0x7c3aed;
+const BANNER_NAME = 'banner.gif';
+const BANNER_PATH = path.join(__dirname, BANNER_NAME);
+const hasBanner = () => fs.existsSync(BANNER_PATH);
 
 const text = (md) => new TextDisplayBuilder().setContent(md);
 const sep = (big = false) =>
@@ -21,12 +27,12 @@ const sep = (big = false) =>
     .setDivider(true)
     .setSpacing(big ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small);
 
-const bar = (value, max, size = 10) => {
-  if (max <= 0 || value <= 0) return '▱'.repeat(size);
-  const filled = Math.max(1, Math.round((value / max) * size));
-  return '▰'.repeat(filled) + '▱'.repeat(size - filled);
+// Big purple squares — much easier to read than thin bars
+const bar = (value, max, size = 8) => {
+  const filled = max > 0 && value > 0 ? Math.max(1, Math.round((value / max) * size)) : 0;
+  return '🟪'.repeat(filled) + '⬛'.repeat(size - filled);
 };
-const medal = (i) => ['🥇', '🥈', '🥉'][i] ?? `\`${i + 1}\``;
+const RANK = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
 
 function getRooms(guild) {
   const all = storage.getAllTempChannels();
@@ -40,49 +46,79 @@ function getRooms(guild) {
     .sort((a, b) => b.count - a.count);
 }
 
-function buildDashboardPayload(guild) {
+function roomBlock(r, i, max) {
+  const limit = r.channel.userLimit ? r.channel.userLimit : '∞';
+  const owner = r.data.ownerId ? `👑 <@${r.data.ownerId}>` : '👑 —';
+  const lock = r.data.locked ? '  🔒' : '';
+  return (
+    `${RANK[i]}  **${r.channel.name}**${lock}\n` +
+    `${bar(r.count, max)}  **${r.count}**/${limit}\n` +
+    `-# ${owner}`
+  );
+}
+
+function buildContainer(guild, banner) {
   const rooms = getRooms(guild);
-  const users = rooms.reduce((s, r) => s + r.count, 0);
-  const top = rooms.slice(0, 5);
+  const live = rooms.filter((r) => r.count > 0);
+  const users = live.reduce((s, r) => s + r.count, 0);
+  const locked = rooms.filter((r) => r.data.locked).length;
+  const top = live.slice(0, 5);
   const max = top[0]?.count ?? 0;
   const now = Math.floor(Date.now() / 1000);
 
-  const topLines = top.length
-    ? top
-        .map(
-          (r, i) =>
-            `${medal(i)} ${r.data.locked ? '🔒 ' : ''}**${r.channel.name}**\n` +
-            `-# ${bar(r.count, max)}  \`${r.count}\` online`
-        )
-        .join('\n')
-    : '*No active rooms right now — join the create channel and open the first one.*';
+  const container = new ContainerBuilder().setAccentColor(ACCENT);
 
-  const container = new ContainerBuilder()
-    .setAccentColor(ACCENT)
+  if (banner) {
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(`attachment://${BANNER_NAME}`)
+      )
+    );
+  }
+
+  container
     .addTextDisplayComponents(
-      text(`# 👑 ELITE VOICE STATS\n-# ${guild.name}  •  *live voice activity*`)
+      text(`# 👑 ELITE VOICE\n-# ${guild.name}  •  *live voice activity*`)
     )
-    .addSeparatorComponents(sep())
+    .addSeparatorComponents(sep(true))
     .addTextDisplayComponents(
       text(
-        `### 📊 Snapshot\n` +
-          `> 🔊 **Rooms** \`${rooms.length}\`  ┃  👥 **In voice** \`${users}\`  ┃  🔥 **Hottest** ${
-            top[0] ? `**${top[0].channel.name}**` : '`—`'
-          }`
+        `## 🔊 ${live.length} ${live.length === 1 ? 'Room' : 'Rooms'}  ・  👥 ${users} Online\n` +
+          `-# 🔥 Hottest: ${top[0] ? `**${top[0].channel.name}**` : '—'}  •  🔒 ${locked} locked  •  🌐 ${
+            rooms.length - locked
+          } open`
       )
     )
     .addSeparatorComponents(sep(true))
-    .addTextDisplayComponents(text(`### 🏆 Top Rooms\n${topLines}`))
+    .addTextDisplayComponents(
+      text(
+        `### 🏆 Leaderboard\n` +
+          (top.length
+            ? top.map((r, i) => roomBlock(r, i, max)).join('\n\n')
+            : '*Nobody is in voice right now.*\n*Join the create channel and open the first room.*')
+      )
+    )
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(
-      text(`-# Updated <t:${now}:R>  •  auto-refresh every 20s  •  ELITE SYSTEM`)
+      text(`-# 🔄 Updated <t:${now}:R>  •  every 20s  •  ELITE SYSTEM`)
     );
 
-  return { components: [container], flags: MessageFlags.IsComponentsV2 };
+  return container;
 }
 
-// Kept so old code importing buildDashboardEmbed doesn't crash.
-// It now returns a message payload, NOT an embed — send it as-is, don't wrap it in { embeds: [...] }.
+// Full payload for sending a NEW message
+function buildDashboardPayload(guild) {
+  const banner = hasBanner();
+  const payload = {
+    components: [buildContainer(guild, banner)],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] }, // owner mentions show as names, never ping
+  };
+  if (banner) payload.files = [new AttachmentBuilder(BANNER_PATH, { name: BANNER_NAME })];
+  return payload;
+}
+
+// Old name kept so other files that import it don't crash (returns a payload, not an embed)
 const buildDashboardEmbed = buildDashboardPayload;
 
 const busy = new Set();
@@ -90,7 +126,7 @@ const busy = new Set();
 async function refreshDashboard(guild) {
   const config = storage.getGuildConfig(guild.id);
   if (!config || !config.statsChannelId || !config.statsMessageId) return;
-  if (busy.has(guild.id)) return; // don't overlap two refreshes
+  if (busy.has(guild.id)) return;
   busy.add(guild.id);
 
   try {
@@ -99,16 +135,19 @@ async function refreshDashboard(guild) {
     const message = await channel.messages.fetch(config.statsMessageId).catch(() => null);
     if (!message) return;
 
-    const payload = buildDashboardPayload(guild);
+    const bannerOn = hasBanner();
+    const bannerAttached = message.attachments.some((a) => a.name === BANNER_NAME);
+    const upToDate = message.flags.has(MessageFlags.IsComponentsV2) && bannerOn === bannerAttached;
 
-    if (message.flags.has(MessageFlags.IsComponentsV2)) {
+    if (upToDate) {
+      const { files, ...payload } = buildDashboardPayload(guild);
+      if (bannerOn) payload.attachments = [...message.attachments.values()]; // keep the banner
       await message.edit(payload).catch(() => {});
       return;
     }
 
-    // Old embed message: Discord can't convert it to V2, so post a new one,
-    // save its id, and delete the old one (happens once).
-    const fresh = await channel.send(payload).catch(() => null);
+    // Old/different message: post a fresh one once, save its id, delete the old
+    const fresh = await channel.send(buildDashboardPayload(guild)).catch(() => null);
     if (!fresh) return;
     storage.setGuildConfig(guild.id, { statsMessageId: fresh.id });
     await message.delete().catch(() => {});
