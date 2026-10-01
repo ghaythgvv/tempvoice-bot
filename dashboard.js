@@ -1,115 +1,131 @@
-// dashboard.js
-// Keeps one overview message (if configured) up to date with a live list of
-// every active temp/game voice channel in the guild. Looks for
-// `dashboardChannelId` (and optionally a saved `dashboardMessageId`) on the
-// guild's config record in storage — set those via whatever setup/config
-// command your bot uses. If nothing is configured, this quietly no-ops so
-// guilds that don't use a dashboard aren't affected.
+// dashboard.js — ELITE Temp Voice Stats (Components V2)
+// Server-wide "how busy is the temp-vc system" view. Lives in its own channel
+// and refreshes itself. Requires discord.js >= 14.19.
+//
+// NOTE: a Components V2 message can't have `content` or `embeds`.
 
-const { EmbedBuilder } = require('discord.js');
+const {
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MessageFlags,
+} = require('discord.js');
 const storage = require('./storage');
-const { toFancyBold } = require('./utils');
 
-// Same violet accent used across the rest of the bot's panels.
-const DASHBOARD_COLOR = 0x8b5cf6;
+const ACCENT = 0x7c3aed;
 
-// Discord caps embeds at 25 fields — plenty for a live "who's online"
-// board, but if you ever get more channels than that at once the extras
-// just won't have their own field (nothing breaks, they're just left off).
-const MAX_FIELDS = 25;
+const text = (md) => new TextDisplayBuilder().setContent(md);
+const sep = (big = false) =>
+  new SeparatorBuilder()
+    .setDivider(true)
+    .setSpacing(big ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small);
 
-function buildChannelField(guild, channelId, data) {
-  const channel = guild.channels.cache.get(channelId);
-  if (!channel) return null; // it got deleted since the last refresh — just skip it
+const bar = (value, max, size = 10) => {
+  if (max <= 0 || value <= 0) return '▱'.repeat(size);
+  const filled = Math.max(1, Math.round((value / max) * size));
+  return '▰'.repeat(filled) + '▱'.repeat(size - filled);
+};
+const medal = (i) => ['🥇', '🥈', '🥉'][i] ?? `\`${i + 1}\``;
 
-  const memberCount = channel.members.size;
-  const ownerTag = data.ownerId ? `<@${data.ownerId}>` : 'Unknown';
-
-  const lines = [`👤 **Owner:** ${ownerTag}`, `👥 **Members:** ${memberCount}`];
-
-  if (data.type === 'game') {
-    if (data.partyCode) lines.push(`🔑 **Party Code:** \`${data.partyCode}\``);
-    if (data.gameNameExtra) lines.push(`📝 **Game Name:** \`${data.gameNameExtra}\``);
-  } else {
-    lines.push(data.locked ? '🔒 **Status:** Locked' : '🔓 **Status:** Open');
-    if (data.limit) lines.push(`🎚️ **Limit:** ${data.limit}`);
-  }
-
-  lines.push(`🔗 Jump in: <#${channelId}>`);
-
-  return {
-    name: channel.name,
-    value: lines.join('\n'),
-    inline: true,
-  };
-}
-
-function buildDashboardEmbed(guild, channels) {
-  const embed = new EmbedBuilder()
-    .setColor(DASHBOARD_COLOR)
-    .setTitle(`🎙️ ${toFancyBold(guild.name.toUpperCase())} — ${toFancyBold('ACTIVE VOICE CHANNELS')}`)
-    .setTimestamp();
-
-  if (guild.iconURL()) embed.setThumbnail(guild.iconURL());
-
-  if (channels.length === 0) {
-    embed
-      .setDescription('😴 Nothing going on right now — be the first to jump in a **Join to Create** channel!')
-      .setFooter({ text: 'Last updated' });
-    return embed;
-  }
-
-  const totalMembers = channels.reduce((sum, { channelId }) => {
-    const channel = guild.channels.cache.get(channelId);
-    return sum + (channel ? channel.members.size : 0);
-  }, 0);
-
-  embed.setDescription(
-    `📡 **${channels.length}** channel${channels.length === 1 ? '' : 's'} live right now • **${totalMembers}** ${totalMembers === 1 ? 'person' : 'people'} connected`
-  );
-
-  const fields = channels
-    .map(({ channelId, data }) => buildChannelField(guild, channelId, data))
+function getRooms(guild) {
+  const all = storage.getAllTempChannels();
+  return Object.entries(all)
+    .filter(([, data]) => data.guildId === guild.id)
+    .map(([channelId, data]) => {
+      const channel = guild.channels.cache.get(channelId);
+      return channel ? { channel, data, count: channel.members.size } : null;
+    })
     .filter(Boolean)
-    .slice(0, MAX_FIELDS);
-
-  embed.addFields(fields);
-  embed.setFooter({ text: 'Last updated' });
-  return embed;
+    .sort((a, b) => b.count - a.count);
 }
+
+function buildDashboardPayload(guild) {
+  const rooms = getRooms(guild);
+  const users = rooms.reduce((s, r) => s + r.count, 0);
+  const top = rooms.slice(0, 5);
+  const max = top[0]?.count ?? 0;
+  const now = Math.floor(Date.now() / 1000);
+
+  const topLines = top.length
+    ? top
+        .map(
+          (r, i) =>
+            `${medal(i)} ${r.data.locked ? '🔒 ' : ''}**${r.channel.name}**\n` +
+            `-# ${bar(r.count, max)}  \`${r.count}\` online`
+        )
+        .join('\n')
+    : '*No active rooms right now — join the create channel and open the first one.*';
+
+  const container = new ContainerBuilder()
+    .setAccentColor(ACCENT)
+    .addTextDisplayComponents(
+      text(`# 👑 ELITE VOICE STATS\n-# ${guild.name}  •  *live voice activity*`)
+    )
+    .addSeparatorComponents(sep())
+    .addTextDisplayComponents(
+      text(
+        `### 📊 Snapshot\n` +
+          `> 🔊 **Rooms** \`${rooms.length}\`  ┃  👥 **In voice** \`${users}\`  ┃  🔥 **Hottest** ${
+            top[0] ? `**${top[0].channel.name}**` : '`—`'
+          }`
+      )
+    )
+    .addSeparatorComponents(sep(true))
+    .addTextDisplayComponents(text(`### 🏆 Top Rooms\n${topLines}`))
+    .addSeparatorComponents(sep())
+    .addTextDisplayComponents(
+      text(`-# Updated <t:${now}:R>  •  auto-refresh every 20s  •  ELITE SYSTEM`)
+    );
+
+  return { components: [container], flags: MessageFlags.IsComponentsV2 };
+}
+
+// Kept so old code importing buildDashboardEmbed doesn't crash.
+// It now returns a message payload, NOT an embed — send it as-is, don't wrap it in { embeds: [...] }.
+const buildDashboardEmbed = buildDashboardPayload;
+
+const busy = new Set();
 
 async function refreshDashboard(guild) {
-  if (!guild) return;
   const config = storage.getGuildConfig(guild.id);
-  if (!config || !config.dashboardChannelId) return; // no dashboard configured for this guild
-
-  const dashboardChannel = guild.channels.cache.get(config.dashboardChannelId);
-  if (!dashboardChannel) {
-    console.warn(`[dashboard] configured dashboardChannelId ${config.dashboardChannelId} not found in ${guild.name}`);
-    return;
-  }
-
-  const all = storage.getAllTempChannels();
-  const channels = Object.entries(all)
-    .filter(([, data]) => data.guildId === guild.id)
-    .map(([channelId, data]) => ({ channelId, data }));
-
-  const embed = buildDashboardEmbed(guild, channels);
+  if (!config || !config.statsChannelId || !config.statsMessageId) return;
+  if (busy.has(guild.id)) return; // don't overlap two refreshes
+  busy.add(guild.id);
 
   try {
-    let message = config.dashboardMessageId
-      ? await dashboardChannel.messages.fetch(config.dashboardMessageId).catch(() => null)
-      : null;
+    const channel = guild.channels.cache.get(config.statsChannelId);
+    if (!channel) return;
+    const message = await channel.messages.fetch(config.statsMessageId).catch(() => null);
+    if (!message) return;
 
-    if (message) {
-      await message.edit({ embeds: [embed] });
-    } else {
-      message = await dashboardChannel.send({ embeds: [embed] });
-      storage.setGuildConfig(guild.id, { dashboardMessageId: message.id });
+    const payload = buildDashboardPayload(guild);
+
+    if (message.flags.has(MessageFlags.IsComponentsV2)) {
+      await message.edit(payload).catch(() => {});
+      return;
     }
-  } catch (err) {
-    console.warn(`[dashboard] could not refresh dashboard in ${guild.name}: ${err.message}`);
+
+    // Old embed message: Discord can't convert it to V2, so post a new one,
+    // save its id, and delete the old one (happens once).
+    const fresh = await channel.send(payload).catch(() => null);
+    if (!fresh) return;
+    storage.setGuildConfig(guild.id, { statsMessageId: fresh.id });
+    await message.delete().catch(() => {});
+  } finally {
+    busy.delete(guild.id);
   }
 }
 
-module.exports = { refreshDashboard };
+async function refreshAllDashboards(client) {
+  for (const [, guild] of client.guilds.cache) {
+    await refreshDashboard(guild);
+  }
+}
+
+module.exports = {
+  buildDashboardPayload,
+  buildDashboardEmbed,
+  refreshDashboard,
+  refreshAllDashboards,
+};
