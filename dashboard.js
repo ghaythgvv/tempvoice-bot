@@ -32,12 +32,31 @@ const sep = (big = false) =>
     .setDivider(true)
     .setSpacing(big ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small);
 
-// Big purple squares — much easier to read than thin bars
-const bar = (value, max, size = 8) => {
-  const filled = max > 0 && value > 0 ? Math.max(1, Math.round((value / max) * size)) : 0;
-  return '🟪'.repeat(filled) + '⬛'.repeat(size - filled);
+// the only emoji used on the card
+const E = {
+  crown: '<:crown:1554186011809021953>',
+  lock: '<:lock:1553472894976393246>',
+  unlock: '<:unlock:1553483080998588456>',
+  fly: '<a:156218darkpurplesparklybutterfly:1553820832927846530>',
 };
-const RANK = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+
+// remove emoji / decorations from names and escape markdown
+const clean = (str, fallback = '') => {
+  const t = String(str || '')
+    .normalize('NFKC')
+    .replace(/<a?:\w+:\d+>/g, '')
+    .replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3]/gu, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s|·•\-_.~:]+|[\s|·•\-_.~:]+$/g, '')
+    .replace(/([*_~|`>\\])/g, '\\$1');
+  return t || fallback;
+};
+
+// progress bar made of plain shapes (no emoji)
+const bar = (value, max, size = 10) => {
+  const filled = max > 0 && value > 0 ? Math.max(1, Math.round((value / max) * size)) : 0;
+  return '▰'.repeat(filled) + '▱'.repeat(size - filled);
+};
 
 function getRooms(guild) {
   const all = storage.getAllTempChannels();
@@ -51,19 +70,36 @@ function getRooms(guild) {
     .sort((a, b) => b.count - a.count);
 }
 
+// make sure the top rooms' owners are cached (profile pictures + names)
+async function prefetchOwners(guild) {
+  const ids = [
+    ...new Set(
+      getRooms(guild)
+        .filter((r) => r.count > 0)
+        .slice(0, 5)
+        .map((r) => r.data.ownerId)
+        .filter(Boolean)
+    ),
+  ];
+  await Promise.all(
+    ids.map((id) => (guild.members.cache.has(id) ? null : guild.members.fetch(id).catch(() => null)))
+  );
+}
+
 function ownerAvatar(guild, r) {
   const m = r.data.ownerId ? guild.members.cache.get(r.data.ownerId) : null;
   return m ? m.displayAvatarURL({ extension: 'png', size: 128 }) : null;
 }
 
-function roomBlock(r, i, max) {
+function roomBlock(guild, r, i, max) {
   const limit = r.channel.userLimit ? r.channel.userLimit : '∞';
-  const owner = r.data.ownerId ? `<@${r.data.ownerId}>` : '—';
-  const state = r.data.locked ? '🔒 Locked' : '🌐 Open';
+  const name = clean(r.channel.name, `Room ${i + 1}`);
+  const member = r.data.ownerId ? guild.members.cache.get(r.data.ownerId) : null;
+  const owner = member ? clean(member.displayName, 'Unknown') : r.data.ownerId ? `<@${r.data.ownerId}>` : '—';
   return (
-    `${RANK[i]}  **${r.channel.name}**\n` +
+    `### \`0${i + 1}\`  ${name}  ${r.data.locked ? E.lock : E.unlock}\n` +
     `${bar(r.count, max)}  **${r.count}** / ${limit}\n` +
-    `-# 👑 ${owner}  •  ${state}`
+    `-# ${E.crown} **${owner}**  ·  ${r.data.locked ? 'Locked' : 'Open'}`
   );
 }
 
@@ -89,11 +125,11 @@ function buildContainer(guild, banner) {
     container
       .addTextDisplayComponents(
         text(
-          `# 👑 ELITE VOICE\n` +
-            `## 🔊 ${live.length} ${live.length === 1 ? 'Room' : 'Rooms'}  ・  👥 ${users} Online\n` +
-            `-# 🔥 Hottest: ${top[0] ? `**${top[0].channel.name}**` : '—'}  •  🔒 ${locked} locked  •  🌐 ${
-              rooms.length - locked
-            } open`
+          `# ${E.fly} ELITE VOICE\n` +
+            `## ${live.length} ${live.length === 1 ? 'Room' : 'Rooms'}  ·  ${users} Online\n` +
+            `-# Hottest: **${top[0] ? clean(top[0].channel.name, 'Room 1') : '—'}**  ·  ${E.lock} ${locked} locked  ·  ${
+              E.unlock
+            } ${rooms.length - locked} open`
         )
       );
   }
@@ -102,8 +138,8 @@ function buildContainer(guild, banner) {
     .addSeparatorComponents(sep(true))
     .addTextDisplayComponents(
       text(
-        `### 🏆 Leaderboard\n` +
-          `-# ${guild.name}  •  top ${top.length} of ${live.length} live ${live.length === 1 ? 'room' : 'rooms'}`
+        `## ${E.fly}  Leaderboard\n` +
+          `-# ${clean(guild.name)}  ·  top ${top.length} of ${live.length} live ${live.length === 1 ? 'room' : 'rooms'}`
       )
     );
 
@@ -115,9 +151,9 @@ function buildContainer(guild, banner) {
 
   top.forEach((r, i) => {
     container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
-    const block = roomBlock(r, i, max);
+    const block = roomBlock(guild, r, i, max);
     const avatar = ownerAvatar(guild, r);
     if (avatar) {
       // owner's profile picture on the right of each room
@@ -141,8 +177,8 @@ function buildContainer(guild, banner) {
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(
       text(
-        (extra.length ? `-# ${extra.join('  •  ')}\n` : '') +
-          `-# 🔄 Updated <t:${now}:R>  •  every 20s  •  ELITE SYSTEM`
+        (extra.length ? `-# ${extra.join('  ·  ')}\n` : '') +
+          `-# ${E.fly} Updated <t:${now}:R>  ·  every 20s  ·  ELITE SYSTEM`
       )
     );
 
@@ -177,6 +213,8 @@ async function refreshDashboard(guild) {
     if (!channel) return;
     const message = await channel.messages.fetch(config.statsMessageId).catch(() => null);
     if (!message) return;
+
+    await prefetchOwners(guild);
 
     // --- live animated banner (falls back to the old code below if it can't render) ---
     if (message.flags.has(MessageFlags.IsComponentsV2)) {
