@@ -147,8 +147,8 @@ function avatarCircle(ctx, img, cx, cy, r, initial, pal, glow) {
     ctx.fillStyle = ig;
     ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
     ctx.fillStyle = '#ffffff';
-    ctx.font = `34px ${F_BOLD}`;
-    tracked(ctx, initial, cx, cy + 12, 0, 'center');
+    ctx.font = `${Math.round(r * 0.95)}px ${F_BOLD}`;
+    tracked(ctx, initial, cx, cy + r * 0.34, 0, 'center');
   }
   ctx.restore();
 }
@@ -329,9 +329,9 @@ function drawOverlay(ctx, data, icon) {
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   tracked(ctx, 'BY PEOPLE', 972, 263, 3, 'right');
 
-  const colW = 140, colGap = 22;
+  const colW = 150, colGap = 16;
   const x0 = 468 + (536 - (colW * 3 + colGap * 2)) / 2;
-  const yBase = 574, hMax = 196, hMin = 122;
+  const yBase = 574, hMax = 206, hMin = 136;
   const top = live.slice(0, 3);
   const maxC = top[0] ? top[0].count : 0;
   const order = [1, 0, 2];
@@ -404,19 +404,19 @@ function drawOverlay(ctx, data, icon) {
     ctx.restore();
 
     // count + name + status on the pedestal face
-    ctx.font = `54px ${F_BOLD}`;
+    ctx.font = `58px ${F_BOLD}`;
     ctx.fillStyle = '#1b0b36';
-    tracked(ctx, String(room.count), mid, yTop + 66, 0, 'center');
-    ctx.font = `17px ${F_BOLD}`;
-    ctx.fillStyle = 'rgba(27,11,54,0.85)';
-    const nm = fit(ctx, cleanName(room.name, 'Room ' + (rank + 1)), colW - 22);
-    tracked(ctx, nm, mid, yTop + 96, 0, 'center');
+    tracked(ctx, String(room.count), mid, yTop + 68, 0, 'center');
+    ctx.font = `19px ${F_BOLD}`;
+    ctx.fillStyle = 'rgba(27,11,54,0.9)';
+    const nm = fit(ctx, cleanName(room.name, 'Room ' + (rank + 1)), colW - 14);
+    tracked(ctx, nm, mid, yTop + 100, 0, 'center');
     ctx.font = `12px ${F_MED}`;
     ctx.fillStyle = 'rgba(27,11,54,0.55)';
     tracked(ctx, room.locked ? 'LOCKED' : 'OPEN', mid, yBase - 14, 3, 'center');
 
     // avatar medal
-    const ar = 36;
+    const ar = 42;
     const acy = yTop - ar - 10;
     const initial = cleanName(room.name, '?').charAt(0).toUpperCase();
     avatarCircle(ctx, room.avatarImg || null, mid, acy, ar, initial, p, glows[rank]);
@@ -424,15 +424,15 @@ function drawOverlay(ctx, data, icon) {
     // rank badge
     const bx = mid + ar * 0.78, by = acy + ar * 0.78;
     ctx.beginPath();
-    ctx.arc(bx, by, 14, 0, Math.PI * 2);
-    ctx.fillStyle = goldLike(ctx, bx, by, 14, p);
+    ctx.arc(bx, by, 16, 0, Math.PI * 2);
+    ctx.fillStyle = goldLike(ctx, bx, by, 16, p);
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(12,6,24,0.85)';
     ctx.stroke();
-    ctx.font = `17px ${F_BOLD}`;
+    ctx.font = `19px ${F_BOLD}`;
     ctx.fillStyle = '#1b0b36';
-    tracked(ctx, String(rank + 1), bx, by + 6, 0, 'center');
+    tracked(ctx, String(rank + 1), bx, by + 7, 0, 'center');
 
     if (rank === 0) {
       drawCrown(ctx, mid, acy - ar - 10);
