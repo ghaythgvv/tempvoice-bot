@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { drawBase, drawOverlay, drawPulse, W, H } = require('./bannerDraw');
 
-const SCALE = 0.6;     // output size = 840x384. Raise toward 1 for sharper (bigger file), lower for smaller.
+const SCALE = 0.9;     // output size = 1260x702. Raise toward 1 for sharper (bigger file), lower for smaller.
 const FRAME_MS = 70;   // delay per frame
 const LIGHTNING_ALPHA = 0.85;
 
@@ -76,6 +76,21 @@ async function getIcon(guild) {
   }
 }
 
+const avatarCache = new Map(); // url -> image
+async function getAvatar(url) {
+  if (!url) return null;
+  if (avatarCache.has(url)) return avatarCache.get(url);
+  try {
+    const res = await fetch(url);
+    const image = await canvasLib.loadImage(Buffer.from(await res.arrayBuffer()));
+    if (avatarCache.size > 60) avatarCache.clear();
+    avatarCache.set(url, image);
+    return image;
+  } catch {
+    return null;
+  }
+}
+
 const lastRender = new Map(); // guild.id -> { key, buf }  (skip re-encoding when nothing changed)
 
 /** data: { users:number, rooms:[{count, locked}] } sorted by count desc → GIF Buffer or null */
@@ -106,7 +121,10 @@ async function renderStatsBanner(guild, data) {
     const [baseC, baseX] = make();
     drawBase(baseX);
     const [overC, overX] = make();
-    const geo = drawOverlay(overX, data, icon);
+    // top-3 rooms may carry an owner avatar url → load it for the podium
+    const drawData = { ...data, rooms: data.rooms.map((r) => ({ ...r })) };
+    for (const r of drawData.rooms.slice(0, 3)) r.avatarImg = await getAvatar(r.avatar);
+    const geo = drawOverlay(overX, drawData, icon);
 
     const [, ctx] = make();
     const gif = gifenc.GIFEncoder();
@@ -122,7 +140,11 @@ async function renderStatsBanner(guild, data) {
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
         ctx.globalAlpha = LIGHTNING_ALPHA;
-        ctx.drawImage(frames[i], 0, 0, W, H);
+        // cover-fit the lightning frame to the banner shape
+        const fw = frames[i].width, fh = frames[i].height;
+        const sw = Math.min(fw, (fh * W) / H);
+        const sh = sw * (H / W);
+        ctx.drawImage(frames[i], (fw - sw) / 2, (fh - sh) / 2, sw, sh, 0, 0, W, H);
         ctx.restore();
       }
       ctx.drawImage(overC, 0, 0, W, H);
