@@ -20,6 +20,9 @@ const ACCENT = 0x7c3aed;
 const BANNER_NAME = 'banner.gif';
 const BANNER_PATH = path.join(__dirname, BANNER_NAME);
 const hasBanner = () => fs.existsSync(BANNER_PATH);
+const { renderStatsBanner } = require('./bannerRenderer');
+const LIVE_PREFIX = 'elite-voice-';
+const lastKey = new Map();
 
 const text = (md) => new TextDisplayBuilder().setContent(md);
 const sep = (big = false) =>
@@ -71,7 +74,7 @@ function buildContainer(guild, banner) {
   if (banner) {
     container.addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL(`attachment://${BANNER_NAME}`)
+        new MediaGalleryItemBuilder().setURL(`attachment://${banner}`)
       )
     );
   }
@@ -110,7 +113,7 @@ function buildContainer(guild, banner) {
 function buildDashboardPayload(guild) {
   const banner = hasBanner();
   const payload = {
-    components: [buildContainer(guild, banner)],
+    components: [buildContainer(guild, banner ? BANNER_NAME : null)],
     flags: MessageFlags.IsComponentsV2,
     allowedMentions: { parse: [] }, // owner mentions show as names, never ping
   };
@@ -134,6 +137,43 @@ async function refreshDashboard(guild) {
     if (!channel) return;
     const message = await channel.messages.fetch(config.statsMessageId).catch(() => null);
     if (!message) return;
+
+    // --- live animated banner (falls back to the old code below if it can't render) ---
+    if (message.flags.has(MessageFlags.IsComponentsV2)) {
+      const rooms = getRooms(guild);
+      const data = {
+        users: rooms.reduce((s, r) => s + r.count, 0),
+        rooms: rooms.map((r) => ({ count: r.count, locked: !!r.data.locked })),
+      };
+      const key = JSON.stringify(data);
+      const old = [...message.attachments.values()].find(
+        (a) => a.name && a.name.startsWith(LIVE_PREFIX)
+      );
+      let live = null;
+      if (old && lastKey.get(guild.id) === key) {
+        live = { name: old.name }; // nothing changed: keep the GIF already on the message
+      } else {
+        const gif = await renderStatsBanner(guild, data);
+        if (gif) {
+          const name = `${LIVE_PREFIX}${Date.now()}.gif`;
+          live = { name, file: new AttachmentBuilder(gif, { name }) };
+        } else if (old) {
+          live = { name: old.name };
+        }
+      }
+      if (live) {
+        const payload = {
+          components: [buildContainer(guild, live.name)],
+          flags: MessageFlags.IsComponentsV2,
+          allowedMentions: { parse: [] },
+          attachments: live.file ? [] : [old],
+        };
+        if (live.file) payload.files = [live.file];
+        const ok = await message.edit(payload).then(() => true).catch(() => false);
+        if (ok && live.file) lastKey.set(guild.id, key);
+        return;
+      }
+    }
 
     const bannerOn = hasBanner();
     const bannerAttached = message.attachments.some((a) => a.name === BANNER_NAME);
