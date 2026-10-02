@@ -11,6 +11,8 @@ const {
   SeparatorSpacingSize,
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
+  SectionBuilder,
+  ThumbnailBuilder,
   AttachmentBuilder,
   MessageFlags,
 } = require('discord.js');
@@ -49,14 +51,19 @@ function getRooms(guild) {
     .sort((a, b) => b.count - a.count);
 }
 
+function ownerAvatar(guild, r) {
+  const m = r.data.ownerId ? guild.members.cache.get(r.data.ownerId) : null;
+  return m ? m.displayAvatarURL({ extension: 'png', size: 128 }) : null;
+}
+
 function roomBlock(r, i, max) {
   const limit = r.channel.userLimit ? r.channel.userLimit : '∞';
-  const owner = r.data.ownerId ? `👑 <@${r.data.ownerId}>` : '👑 —';
-  const lock = r.data.locked ? '  🔒' : '';
+  const owner = r.data.ownerId ? `<@${r.data.ownerId}>` : '—';
+  const state = r.data.locked ? '🔒 Locked' : '🌐 Open';
   return (
-    `${RANK[i]}  **${r.channel.name}**${lock}\n` +
-    `${bar(r.count, max)}  **${r.count}**/${limit}\n` +
-    `-# ${owner}`
+    `${RANK[i]}  **${r.channel.name}**\n` +
+    `${bar(r.count, max)}  **${r.count}** / ${limit}\n` +
+    `-# 👑 ${owner}  •  ${state}`
   );
 }
 
@@ -77,33 +84,66 @@ function buildContainer(guild, banner) {
         new MediaGalleryItemBuilder().setURL(`attachment://${banner}`)
       )
     );
+  } else {
+    // no banner image → keep the numbers in text so the card still tells the story
+    container
+      .addTextDisplayComponents(
+        text(
+          `# 👑 ELITE VOICE\n` +
+            `## 🔊 ${live.length} ${live.length === 1 ? 'Room' : 'Rooms'}  ・  👥 ${users} Online\n` +
+            `-# 🔥 Hottest: ${top[0] ? `**${top[0].channel.name}**` : '—'}  •  🔒 ${locked} locked  •  🌐 ${
+              rooms.length - locked
+            } open`
+        )
+      );
   }
 
   container
-    .addTextDisplayComponents(
-      text(`# 👑 ELITE VOICE\n-# ${guild.name}  •  *live voice activity*`)
-    )
-    .addSeparatorComponents(sep(true))
-    .addTextDisplayComponents(
-      text(
-        `## 🔊 ${live.length} ${live.length === 1 ? 'Room' : 'Rooms'}  ・  👥 ${users} Online\n` +
-          `-# 🔥 Hottest: ${top[0] ? `**${top[0].channel.name}**` : '—'}  •  🔒 ${locked} locked  •  🌐 ${
-            rooms.length - locked
-          } open`
-      )
-    )
     .addSeparatorComponents(sep(true))
     .addTextDisplayComponents(
       text(
         `### 🏆 Leaderboard\n` +
-          (top.length
-            ? top.map((r, i) => roomBlock(r, i, max)).join('\n\n')
-            : '*Nobody is in voice right now.*\n*Join the create channel and open the first room.*')
+          `-# ${guild.name}  •  top ${top.length} of ${live.length} live ${live.length === 1 ? 'room' : 'rooms'}`
       )
-    )
+    );
+
+  if (!top.length) {
+    container.addTextDisplayComponents(
+      text('*Nobody is in voice right now.*\n*Join the create channel and open the first room.*')
+    );
+  }
+
+  top.forEach((r, i) => {
+    container.addSeparatorComponents(
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+    );
+    const block = roomBlock(r, i, max);
+    const avatar = ownerAvatar(guild, r);
+    if (avatar) {
+      // owner's profile picture on the right of each room
+      container.addSectionComponents(
+        new SectionBuilder()
+          .addTextDisplayComponents(text(block))
+          .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatar))
+      );
+    } else {
+      container.addTextDisplayComponents(text(block));
+    }
+  });
+
+  const more = live.length - top.length;
+  const idle = rooms.length - live.length;
+  const extra = [];
+  if (more > 0) extra.push(`+${more} more live ${more === 1 ? 'room' : 'rooms'}`);
+  if (idle > 0) extra.push(`${idle} empty`);
+
+  container
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(
-      text(`-# 🔄 Updated <t:${now}:R>  •  every 20s  •  ELITE SYSTEM`)
+      text(
+        (extra.length ? `-# ${extra.join('  •  ')}\n` : '') +
+          `-# 🔄 Updated <t:${now}:R>  •  every 20s  •  ELITE SYSTEM`
+      )
     );
 
   return container;
