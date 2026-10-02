@@ -1,8 +1,8 @@
-// bannerDraw.js — ELITE "Command Deck" banner. Pure Canvas 2D (no Node-only APIs),
+// bannerDraw.js — ELITE "Command Deck" banner v2. Pure Canvas 2D (no Node-only APIs),
 // so it runs in @napi-rs/canvas on the bot and in a browser for previews.
 
 const W = 1400;
-const H = 640;
+const H = 780;
 const F_BOLD = 'EliteBold, Arial, sans-serif';
 const F_MED = 'EliteMed, Arial, sans-serif';
 
@@ -15,6 +15,19 @@ function rr(ctx, x, y, w, h, r) {
   ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// rounded on the top corners only (podium pedestals)
+function rrTop(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h);
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h);
   ctx.closePath();
 }
 
@@ -40,26 +53,119 @@ function goldGrad(ctx, x0, y0, x1, y1) {
   return g;
 }
 
+// channel names are full of emoji / fancy fonts the banner font can't draw → keep plain letters
+function cleanName(s, fallback) {
+  const t = String(s || '')
+    .normalize('NFKC')
+    .replace(/[\u2018\u2019`]/g, "'")
+    .replace(/[^A-Za-z0-9 ._'&!+\-]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s._'&!+\-]+|[\s._'&!+\-]+$/g, '');
+  return t || fallback;
+}
+
+function fit(ctx, s, maxW) {
+  if (ctx.measureText(s).width <= maxW) return s;
+  let t = s;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t.trimEnd() + '…';
+}
+
 function panel(ctx, x, y, w, h) {
-  rr(ctx, x, y, w, h, 28);
-  ctx.fillStyle = "rgba(9,4,20,0.58)";
+  rr(ctx, x, y, w, h, 30);
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, 'rgba(26,12,52,0.66)');
+  g.addColorStop(1, 'rgba(8,3,18,0.62)');
+  ctx.fillStyle = g;
   ctx.fill();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = 'rgba(196,181,253,0.22)';
+  const s = ctx.createLinearGradient(0, y, 0, y + h);
+  s.addColorStop(0, 'rgba(196,181,253,0.40)');
+  s.addColorStop(0.5, 'rgba(196,181,253,0.14)');
+  s.addColorStop(1, 'rgba(196,181,253,0.10)');
+  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = s;
   ctx.stroke();
+  // soft top sheen
+  ctx.save();
+  rr(ctx, x, y, w, h, 30);
+  ctx.clip();
+  const sh = ctx.createLinearGradient(0, y, 0, y + 70);
+  sh.addColorStop(0, 'rgba(167,139,250,0.10)');
+  sh.addColorStop(1, 'rgba(167,139,250,0)');
+  ctx.fillStyle = sh;
+  ctx.fillRect(x, y, w, 70);
+  ctx.restore();
 }
 
 function label(ctx, str, x, y, align = 'left') {
   ctx.font = `20px ${F_MED}`;
-  ctx.fillStyle = 'rgba(196,181,253,0.78)';
+  ctx.fillStyle = 'rgba(196,181,253,0.82)';
   tracked(ctx, str, x, y, 6, align);
+}
+
+function drawCrown(ctx, cx, bottom) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(247,197,72,0.85)';
+  ctx.shadowBlur = 18;
+  ctx.beginPath();
+  ctx.moveTo(cx - 24, bottom);
+  ctx.lineTo(cx - 26, bottom - 22);
+  ctx.lineTo(cx - 12, bottom - 11);
+  ctx.lineTo(cx, bottom - 30);
+  ctx.lineTo(cx + 12, bottom - 11);
+  ctx.lineTo(cx + 26, bottom - 22);
+  ctx.lineTo(cx + 24, bottom);
+  ctx.closePath();
+  ctx.fillStyle = goldGrad(ctx, cx - 26, bottom - 30, cx + 26, bottom);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = 'rgba(120,70,10,0.45)';
+  ctx.fillRect(cx - 22, bottom - 5, 44, 3);
+}
+
+function avatarCircle(ctx, img, cx, cy, r, initial, pal, glow) {
+  ctx.save();
+  ctx.shadowColor = glow;
+  ctx.shadowBlur = 22;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 5, 0, Math.PI * 2);
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = goldLike(ctx, cx, cy, r, pal);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  if (img) {
+    ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+  } else {
+    const ig = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    ig.addColorStop(0, '#7c3aed');
+    ig.addColorStop(1, '#2e0f6b');
+    ctx.fillStyle = ig;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `34px ${F_BOLD}`;
+    tracked(ctx, initial, cx, cy + 12, 0, 'center');
+  }
+  ctx.restore();
+}
+
+function goldLike(ctx, cx, cy, r, pal) {
+  const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+  g.addColorStop(0, pal[0]);
+  g.addColorStop(0.5, pal[1]);
+  g.addColorStop(1, pal[2]);
+  return g;
 }
 
 // ---------- layers ----------
 // 1) drawBase    : static dark background (gradients, glows, hairlines)
 // 2) lightning   : animated frame blended with 'screen' (done by the caller)
 // 3) drawOverlay : header + glass panels + live data (static for one render)
-// 4) drawPulse   : tiny animated bits (LIVE ring, hottest-room glow)
+// 4) drawPulse   : animated bits (LIVE ring, equalizer, crown glow, hottest-room glow)
 
 function drawBase(ctx) {
   const bgGrad = ctx.createLinearGradient(0, 0, W, H);
@@ -75,7 +181,13 @@ function drawBase(ctx) {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
-  g = ctx.createRadialGradient(1260, 590, 0, 1260, 590, 520);
+  g = ctx.createRadialGradient(720, 400, 0, 720, 400, 520);
+  g.addColorStop(0, 'rgba(124,58,237,0.20)');
+  g.addColorStop(1, 'rgba(124,58,237,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  g = ctx.createRadialGradient(1260, H - 50, 0, 1260, H - 50, 520);
   g.addColorStop(0, 'rgba(245,176,65,0.16)');
   g.addColorStop(1, 'rgba(245,176,65,0)');
   ctx.fillStyle = g;
@@ -93,7 +205,7 @@ function drawBase(ctx) {
 
 /**
  * Transparent overlay. Returns geometry used by drawPulse.
- * @param data { users:number, rooms:[{count:number, locked:boolean}] }  rooms sorted by count desc
+ * @param data { users:number, rooms:[{count, locked, name?, avatarImg?}] }  rooms sorted by count desc
  * @param icon image/canvas for the server icon, or null
  */
 function drawOverlay(ctx, data, icon) {
@@ -102,7 +214,7 @@ function drawOverlay(ctx, data, icon) {
   const users = data.users ?? live.reduce((s, r) => s + r.count, 0);
   const locked = rooms.filter((r) => r.locked).length;
   const open = rooms.length - locked;
-  const geo = { dot: null, top: null };
+  const geo = { dot: null, top: null, eq: null, crown: null };
 
   // darken the header so the title stays crisp over the lightning
   const hv = ctx.createLinearGradient(0, 0, 0, 200);
@@ -115,7 +227,7 @@ function drawOverlay(ctx, data, icon) {
   rr(ctx, 14, 14, W - 28, H - 28, 30);
   ctx.lineWidth = 2;
   ctx.strokeStyle = goldGrad(ctx, 0, 0, W, H);
-  ctx.globalAlpha = 0.45;
+  ctx.globalAlpha = 0.5;
   ctx.stroke();
   ctx.globalAlpha = 1;
 
@@ -156,7 +268,7 @@ function drawOverlay(ctx, data, icon) {
   tracked(ctx, 'VOICE', 206 + wE + 24, 114, 5);
 
   ctx.font = `20px ${F_MED}`;
-  ctx.fillStyle = 'rgba(196,181,253,0.72)';
+  ctx.fillStyle = 'rgba(196,181,253,0.78)';
   tracked(ctx, 'LEADERS  COMMAND  DECK', 208, 152, 6);
 
   // LIVE pill
@@ -183,94 +295,161 @@ function drawOverlay(ctx, data, icon) {
   // divider
   const dv = ctx.createLinearGradient(44, 0, W - 44, 0);
   dv.addColorStop(0, 'rgba(167,139,250,0)');
-  dv.addColorStop(0.5, 'rgba(167,139,250,0.4)');
+  dv.addColorStop(0.5, 'rgba(167,139,250,0.45)');
   dv.addColorStop(1, 'rgba(167,139,250,0)');
   ctx.fillStyle = dv;
   ctx.fillRect(44, 192, W - 88, 2);
 
   // ===== hero: IN VOICE =====
-  panel(ctx, 44, 220, 490, 244);
-  label(ctx, 'IN VOICE', 76, 262);
+  panel(ctx, 44, 220, 400, 380);
+  label(ctx, 'IN VOICE', 76, 264);
   const digits = String(users).length;
-  const size = digits <= 2 ? 180 : digits === 3 ? 150 : 118;
+  const size = digits <= 2 ? 196 : digits === 3 ? 156 : 120;
   ctx.font = `${size}px ${F_BOLD}`;
-  const ng = ctx.createLinearGradient(0, 290, 0, 420);
+  const ng = ctx.createLinearGradient(0, 296, 0, 430);
   ng.addColorStop(0, '#ffffff');
   ng.addColorStop(1, '#fcd779');
   ctx.save();
-  ctx.shadowColor = 'rgba(124,58,237,0.75)';
-  ctx.shadowBlur = 40;
+  ctx.shadowColor = 'rgba(124,58,237,0.8)';
+  ctx.shadowBlur = 44;
   ctx.fillStyle = ng;
   ctx.textAlign = 'left';
-  ctx.fillText(String(users), 70, 412);
+  ctx.fillText(String(users), 68, 430);
   ctx.restore();
   ctx.font = `21px ${F_MED}`;
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.textAlign = 'left';
-  ctx.fillText(users === 1 ? 'person connected right now' : 'people connected right now', 76, 446);
+  ctx.fillText(users === 1 ? 'person connected right now' : 'people connected right now', 76, 468);
+  geo.eq = { x: 76, bottom: 574, w: 336, h: 72, active: users > 0 };
 
   // ===== podium: TOP ROOMS =====
-  panel(ctx, 566, 220, 346, 244);
-  label(ctx, 'TOP ROOMS', 596, 262);
-  const colW = 88, colGap = 18;
-  const x0 = 566 + (346 - (colW * 3 + colGap * 2)) / 2;
-  const yBase = 440, maxH = 128, minH = 38;
+  panel(ctx, 468, 220, 536, 380);
+  label(ctx, 'TOP ROOMS', 500, 264);
+  ctx.font = `14px ${F_MED}`;
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  tracked(ctx, 'BY PEOPLE', 972, 263, 3, 'right');
+
+  const colW = 140, colGap = 22;
+  const x0 = 468 + (536 - (colW * 3 + colGap * 2)) / 2;
+  const yBase = 574, hMax = 196, hMin = 122;
   const top = live.slice(0, 3);
   const maxC = top[0] ? top[0].count : 0;
   const order = [1, 0, 2];
   const palettes = [
-    ['#fff3c4', '#f7c548', '#b9791a'],
-    ['#eef0fb', '#bfc4de', '#7c829f'],
-    ['#f3c39a', '#d08a55', '#8f5228'],
+    ['#fff1b8', '#f7c548', '#d99a22', '#8a560f'],
+    ['#f4f6ff', '#c9cde4', '#9097b5', '#5b6080'],
+    ['#f6cfa8', '#dc9560', '#a8622f', '#6b3a17'],
   ];
+  const glows = ['rgba(247,197,72,0.75)', 'rgba(201,205,228,0.5)', 'rgba(220,149,96,0.5)'];
+
+  // floor line under the podium
+  const fl = ctx.createLinearGradient(486, 0, 986, 0);
+  fl.addColorStop(0, 'rgba(196,181,253,0)');
+  fl.addColorStop(0.5, 'rgba(196,181,253,0.35)');
+  fl.addColorStop(1, 'rgba(196,181,253,0)');
+  ctx.fillStyle = fl;
+  ctx.fillRect(486, yBase, 500, 2);
+
   order.forEach((rank, col) => {
     const x = x0 + col * (colW + colGap);
+    const mid = x + colW / 2;
     const room = top[rank];
     if (!room) {
-      rr(ctx, x, yBase - 26, colW, 26, 10);
-      ctx.fillStyle = 'rgba(255,255,255,0.045)';
+      rrTop(ctx, x, yBase - 70, colW, 70, 16);
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
       ctx.fill();
-      ctx.font = `28px ${F_BOLD}`;
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      tracked(ctx, '—', x + colW / 2, yBase - 40, 0, 'center');
+      ctx.save();
+      ctx.setLineDash([7, 7]);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(196,181,253,0.28)';
+      ctx.stroke();
+      ctx.restore();
+      ctx.font = `13px ${F_MED}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      tracked(ctx, 'OPEN SLOT', mid, yBase - 28, 3, 'center');
       return;
     }
-    const h = minH + (maxC > 0 ? (room.count / maxC) * (maxH - minH) : 0);
+    const h = hMin + (maxC > 0 ? (room.count / maxC) * (hMax - hMin) : 0);
+    const yTop = yBase - h;
     const p = palettes[rank];
-    const bgd = ctx.createLinearGradient(0, yBase - h, 0, yBase);
-    bgd.addColorStop(0, p[0]);
-    bgd.addColorStop(0.45, p[1]);
-    bgd.addColorStop(1, p[2]);
+
+    // pedestal
     ctx.save();
     if (rank === 0) {
-      ctx.shadowColor = 'rgba(247,197,72,0.55)';
-      ctx.shadowBlur = 26;
+      ctx.shadowColor = glows[0];
+      ctx.shadowBlur = 34;
     }
-    rr(ctx, x, yBase - h, colW, h, 14);
-    ctx.fillStyle = bgd;
+    rrTop(ctx, x, yTop, colW, h, 18);
+    const bg = ctx.createLinearGradient(0, yTop, 0, yBase);
+    bg.addColorStop(0, p[0]);
+    bg.addColorStop(0.3, p[1]);
+    bg.addColorStop(0.75, p[2]);
+    bg.addColorStop(1, p[3]);
+    ctx.fillStyle = bg;
     ctx.fill();
     ctx.restore();
-    ctx.font = `34px ${F_BOLD}`;
-    ctx.fillStyle = '#ffffff';
-    tracked(ctx, String(room.count), x + colW / 2, yBase - h - 12, 0, 'center');
-    ctx.font = `28px ${F_BOLD}`;
-    ctx.fillStyle = 'rgba(12,6,24,0.7)';
-    tracked(ctx, String(rank + 1), x + colW / 2, yBase - 12, 0, 'center');
+
+    // side shading + top highlight
+    ctx.save();
+    rrTop(ctx, x, yTop, colW, h, 18);
+    ctx.clip();
+    const side = ctx.createLinearGradient(x, 0, x + colW, 0);
+    side.addColorStop(0, 'rgba(255,255,255,0.20)');
+    side.addColorStop(0.45, 'rgba(255,255,255,0)');
+    side.addColorStop(1, 'rgba(0,0,0,0.26)');
+    ctx.fillStyle = side;
+    ctx.fillRect(x, yTop, colW, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(x + 12, yTop + 3, colW - 24, 3);
+    ctx.restore();
+
+    // count + name + status on the pedestal face
+    ctx.font = `54px ${F_BOLD}`;
+    ctx.fillStyle = '#1b0b36';
+    tracked(ctx, String(room.count), mid, yTop + 66, 0, 'center');
+    ctx.font = `17px ${F_BOLD}`;
+    ctx.fillStyle = 'rgba(27,11,54,0.85)';
+    const nm = fit(ctx, cleanName(room.name, 'Room ' + (rank + 1)), colW - 22);
+    tracked(ctx, nm, mid, yTop + 96, 0, 'center');
+    ctx.font = `12px ${F_MED}`;
+    ctx.fillStyle = 'rgba(27,11,54,0.55)';
+    tracked(ctx, room.locked ? 'LOCKED' : 'OPEN', mid, yBase - 14, 3, 'center');
+
+    // avatar medal
+    const ar = 36;
+    const acy = yTop - ar - 10;
+    const initial = cleanName(room.name, '?').charAt(0).toUpperCase();
+    avatarCircle(ctx, room.avatarImg || null, mid, acy, ar, initial, p, glows[rank]);
+
+    // rank badge
+    const bx = mid + ar * 0.78, by = acy + ar * 0.78;
+    ctx.beginPath();
+    ctx.arc(bx, by, 14, 0, Math.PI * 2);
+    ctx.fillStyle = goldLike(ctx, bx, by, 14, p);
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(12,6,24,0.85)';
+    ctx.stroke();
+    ctx.font = `17px ${F_BOLD}`;
+    ctx.fillStyle = '#1b0b36';
+    tracked(ctx, String(rank + 1), bx, by + 6, 0, 'center');
+
+    if (rank === 0) {
+      drawCrown(ctx, mid, acy - ar - 10);
+      geo.crown = { x: mid, y: acy - ar - 22 };
+    }
   });
 
   // ===== radar: ROOM RADAR =====
-  panel(ctx, 944, 220, 412, 244);
-  label(ctx, 'ROOM RADAR', 974, 262);
-  ctx.font = `14px ${F_MED}`;
-  ctx.fillStyle = 'rgba(255,255,255,0.38)';
-  tracked(ctx, 'HOTTEST FIRST', 1326, 261, 3, 'right');
+  panel(ctx, 1028, 220, 328, 380);
+  label(ctx, 'ROOM RADAR', 1058, 264);
 
-  const cols = 10, tile = 28, gap = 8;
-  const rowsNeeded = Math.min(4, Math.max(3, Math.ceil(rooms.length / cols)));
+  const cols = 8, tile = 28, gap = 10;
+  const rowsNeeded = Math.min(7, Math.max(5, Math.ceil(rooms.length / cols)));
   const total = cols * rowsNeeded;
   const gridH = rowsNeeded * tile + (rowsNeeded - 1) * gap;
-  const gx = 944 + (412 - (cols * tile + (cols - 1) * gap)) / 2;
-  const gy = 282 + (166 - gridH) / 2;
+  const gx = 1028 + (328 - (cols * tile + (cols - 1) * gap)) / 2;
+  const gy = 290 + (266 - gridH) / 2;
   for (let i = 0; i < total; i++) {
     const x = gx + (i % cols) * (tile + gap);
     const y = gy + Math.floor(i / cols) * (tile + gap);
@@ -307,6 +486,9 @@ function drawOverlay(ctx, data, icon) {
       ctx.fill();
     }
   }
+  ctx.font = `12px ${F_MED}`;
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  tracked(ctx, 'HOTTEST FIRST  •  DOT = LOCKED', 1058, 580, 2);
 
   // ===== chips =====
   const chips = [
@@ -319,33 +501,36 @@ function drawOverlay(ctx, data, icon) {
   const cW = (W - 88 - cGap * 3) / 4;
   chips.forEach(([name, val, color], i) => {
     const x = 44 + i * (cW + cGap);
-    const y = 488;
-    rr(ctx, x, y, cW, 88, 24);
-    ctx.fillStyle = "rgba(9,4,20,0.58)";
+    const y = 624;
+    rr(ctx, x, y, cW, 92, 24);
+    const cg = ctx.createLinearGradient(0, y, 0, y + 92);
+    cg.addColorStop(0, 'rgba(22,10,44,0.66)');
+    cg.addColorStop(1, 'rgba(8,3,18,0.62)');
+    ctx.fillStyle = cg;
     ctx.fill();
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(196,181,253,0.14)';
+    ctx.strokeStyle = 'rgba(196,181,253,0.18)';
     ctx.stroke();
     ctx.save();
     ctx.shadowColor = color;
     ctx.shadowBlur = 12;
-    rr(ctx, x + 18, y + 20, 5, 48, 3);
+    rr(ctx, x + 18, y + 22, 5, 48, 3);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.restore();
     ctx.font = `16px ${F_MED}`;
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    tracked(ctx, name, x + 40, y + 34, 5);
-    ctx.font = `40px ${F_BOLD}`;
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    tracked(ctx, name, x + 40, y + 36, 5);
+    ctx.font = `42px ${F_BOLD}`;
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'left';
-    ctx.fillText(val, x + 40, y + 74);
+    ctx.fillText(val, x + 40, y + 78);
   });
 
   // footer
   ctx.font = `14px ${F_MED}`;
-  ctx.fillStyle = 'rgba(255,255,255,0.32)';
-  tracked(ctx, 'AUTO-REFRESH EVERY 20 SECONDS   •   ELITE SYSTEM', W / 2, 618, 4, 'center');
+  ctx.fillStyle = 'rgba(255,255,255,0.36)';
+  tracked(ctx, 'AUTO-REFRESH EVERY 20 SECONDS   •   ELITE SYSTEM', W / 2, H - 28, 4, 'center');
 
   return geo;
 }
@@ -353,6 +538,7 @@ function drawOverlay(ctx, data, icon) {
 function drawPulse(ctx, geo, phase) {
   if (!geo) return;
   const t = phase * Math.PI * 2;
+
   if (geo.dot) {
     ctx.save();
     ctx.beginPath();
@@ -362,6 +548,7 @@ function drawPulse(ctx, geo, phase) {
     ctx.stroke();
     ctx.restore();
   }
+
   if (geo.top) {
     const k = 0.5 + 0.5 * Math.sin(t);
     ctx.save();
@@ -371,6 +558,35 @@ function drawPulse(ctx, geo, phase) {
     ctx.fillStyle = `rgba(255,236,170,${(0.12 + 0.28 * k).toFixed(3)})`;
     ctx.fill();
     ctx.restore();
+  }
+
+  if (geo.crown) {
+    const k = 0.5 + 0.5 * Math.sin(t + 1.2);
+    const g = ctx.createRadialGradient(geo.crown.x, geo.crown.y, 0, geo.crown.x, geo.crown.y, 70);
+    g.addColorStop(0, `rgba(255,226,140,${(0.10 + 0.22 * k).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(255,226,140,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(geo.crown.x - 70, geo.crown.y - 70, 140, 140);
+  }
+
+  if (geo.eq) {
+    const { x, bottom, w, h, active } = geo.eq;
+    const n = 24, bw = 8;
+    const step = (w - bw) / (n - 1);
+    const grad = ctx.createLinearGradient(0, bottom - h, 0, bottom);
+    grad.addColorStop(0, '#ddd6fe');
+    grad.addColorStop(1, '#7c3aed');
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = active ? 0.9 : 0.35;
+    for (let j = 0; j < n; j++) {
+      const a = Math.sin(t * (1 + (j % 3)) + j * 0.9);
+      const b = Math.sin(t * (1 + ((j + 1) % 2)) + j * 1.7);
+      const v = 0.5 + 0.25 * a + 0.25 * b;
+      const bh = 8 + (h - 8) * (active ? 0.18 + 0.82 * v : 0.05);
+      rr(ctx, x + j * step, bottom - bh, bw, bh, 4);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
 }
 
