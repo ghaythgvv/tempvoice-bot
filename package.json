@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "discord.js": "^14.27.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "@napi-rs/canvas": "^0.1.65",
+    "gifenc": "^1.0.3"
   }
 }
