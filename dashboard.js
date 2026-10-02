@@ -143,7 +143,15 @@ async function refreshDashboard(guild) {
       const rooms = getRooms(guild);
       const data = {
         users: rooms.reduce((s, r) => s + r.count, 0),
-        rooms: rooms.map((r) => ({ count: r.count, locked: !!r.data.locked })),
+        rooms: rooms.map((r, i) => ({
+          count: r.count,
+          locked: !!r.data.locked,
+          name: r.channel.name,
+          avatar:
+            i < 3
+              ? guild.members.cache.get(r.data.ownerId)?.displayAvatarURL({ extension: 'png', size: 128 }) || null
+              : null,
+        })),
       };
       const key = JSON.stringify(data);
       const old = [...message.attachments.values()].find(
