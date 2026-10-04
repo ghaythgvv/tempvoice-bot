@@ -49,7 +49,7 @@ function desiredEmojiForChannel(channel) {
   if (!channel) return null;
   const temp = storage.getTempChannel(channel.id);
   if (temp) return temp.emoji || undefined;
-  if (STATIC_EMOJI_SYNC_CHANNEL_IDS.has(channel.id)) return getChannelLeadingEmoji(channel) || undefined;
+  if (STATIC_EMOJI_SYNC_CHANNEL_IDS.has(channel.id)) return getChannelLeadingEmoji(channel) || null;
   return null;
 }
 
@@ -59,6 +59,7 @@ function syncMemberEmoji(guild, memberId, { allowRemove = true } = {}) {
   return syncNickname(guild, memberId, () => {
     const channel = guild.voiceStates.cache.get(memberId)?.channel ?? null;
     const wanted = desiredEmojiForChannel(channel);
+    console.log(`[emoji] ${memberId} in "${channel?.name ?? 'no voice channel'}" -> ${wanted === null ? 'remove emoji' : wanted === undefined ? 'leave alone' : wanted}`);
     if (wanted === null) return allowRemove ? null : undefined;
     return wanted;
   }).catch((err) => {
@@ -480,5 +481,7 @@ module.exports = {
   refreshPanelMessage,
   snapshotOwnerSettings,
   syncMemberEmoji,
+  syncChannelMembers,
+};
   syncChannelMembers,
 };
