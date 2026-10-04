@@ -483,5 +483,3 @@ module.exports = {
   syncMemberEmoji,
   syncChannelMembers,
 };
-  syncChannelMembers,
-};
