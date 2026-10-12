@@ -263,6 +263,7 @@ async function createTempChannelInner(member, guild, config) {
   const tempDataRecord = {
     guildId: guild.id,
     ownerId: member.id,
+    originalOwnerId: member.id, // gets the channel back automatically if they leave and return
     emoji,
     customName: (saved && saved.customName) || null,
     limit: (saved && saved.limit) || 0,
@@ -364,6 +365,18 @@ async function handleVoiceStateUpdate(oldState, newState) {
 
   // Owner left or came back -> flip the Transfer / Claim button on the panel
   const newTempData = newChannelId ? storage.getTempChannel(newChannelId) : null;
+
+  // Original owner came back to a channel someone else claimed -> give it back
+  if (newTempData && newTempData.originalOwnerId === member.id && newTempData.ownerId !== member.id) {
+    const ch = guild.channels.cache.get(newChannelId);
+    if (ch) {
+      const claimerId = newTempData.ownerId;
+      newTempData.ownerId = member.id;
+      storage.setTempChannel(newChannelId, newTempData);
+      const claimerIsTrusted = (newTempData.trusted || []).includes(claimerId);
+      await updateOwnerPermissions(ch, claimerIsTrusted ? null : claimerId, member.id);
+    }
+  }
   for (const [id, data] of [[oldChannelId, oldTempData], [newChannelId, newTempData]]) {
     if (!data || data.ownerId !== member.id) continue;
     const ch = guild.channels.cache.get(id);
