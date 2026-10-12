@@ -499,7 +499,7 @@ async function handleClaim(interaction) {
   await updateOwnerPermissions(channel, oldOwnerId, interaction.user.id);
   await refreshPanelMessage(channel, tempData);
 
-  await interaction.reply({ content: `👑 ${bold('You are now the channel owner.')}`, ...EPHEMERAL });
+  await interaction.reply({ content: `<:owner:1554186011809021953> ${bold('You are now the channel owner.')}`, ...EPHEMERAL });
 }
 
 async function handleTimerOpen(interaction) {
