@@ -476,6 +476,7 @@ async function handleTransferSelect(interaction) {
 
   const oldOwnerId = tempData.ownerId;
   tempData.ownerId = newOwner.id;
+  tempData.originalOwnerId = newOwner.id; // a deliberate hand-over is permanent
   storage.setTempChannel(voiceChannelId, tempData);
   await updateOwnerPermissions(channel, oldOwnerId, newOwner.id);
   await refreshPanelMessage(channel, tempData);
@@ -493,10 +494,10 @@ async function handleClaim(interaction) {
     return interaction.reply({ content: bold('The owner is still in the channel.'), ...EPHEMERAL });
   }
 
-  const oldOwnerId = tempData.ownerId;
   tempData.ownerId = interaction.user.id;
   storage.setTempChannel(voiceChannelId, tempData);
-  await updateOwnerPermissions(channel, oldOwnerId, interaction.user.id);
+  // null = keep the old owner's Connect permission, so they can still come back to a locked channel
+  await updateOwnerPermissions(channel, null, interaction.user.id);
   await refreshPanelMessage(channel, tempData);
 
   await interaction.reply({ content: `<:owner:1554186011809021953> ${bold('You are now the channel owner.')}`, ...EPHEMERAL });
