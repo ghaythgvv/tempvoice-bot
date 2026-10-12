@@ -47,6 +47,8 @@ const PANEL_BANNER_URL = 'https://raw.githubusercontent.com/ghaythgvv/tempvoice-
 // about bold() corrupting the digits inside a <:name:id> tag.
 const PANEL_TITLE_EMOJI = '<a:156218darkpurplesparklybutterfly:1553826933890879518>';
 const OWNER_LINE_EMOJI = '<:owner:1554186011809021953>';
+// Same custom crown, in the object form buttons need (Transfer / Claim Ownership).
+const OWNER_BUTTON_EMOJI = { id: '1554186011809021953', name: 'owner' };
 
 // One compact status line instead of four separate rows — lock state,
 // limit, emoji, and the auto-delete timer, separated by middle dots.
@@ -168,8 +170,8 @@ function buildPanelComponents(ownerPresent = true, locked = false) {
 
   // Danger zone
   const ownershipButton = ownerPresent
-    ? new ButtonBuilder().setCustomId('tempvc:transfer').setLabel(bold('Transfer Ownership')).setEmoji(i('transfer')).setStyle(ButtonStyle.Secondary)
-    : new ButtonBuilder().setCustomId('tempvc:claim').setLabel(bold('Claim Ownership')).setEmoji(i('claim')).setStyle(ButtonStyle.Primary);
+    ? new ButtonBuilder().setCustomId('tempvc:transfer').setLabel(bold('Transfer Ownership')).setEmoji(OWNER_BUTTON_EMOJI).setStyle(ButtonStyle.Secondary)
+    : new ButtonBuilder().setCustomId('tempvc:claim').setLabel(bold('Claim Ownership')).setEmoji(OWNER_BUTTON_EMOJI).setStyle(ButtonStyle.Primary);
 
   // The 18+ button has no icon on purpose: the only built-in 18+ emoji (🔞) renders
   // red in Discord, which clashes with the white/purple icon set.
