@@ -171,6 +171,9 @@ async function refreshPanelMessage(channel, tempData) {
   if (!tempData || !tempData.panelMessageId) return;
   try {
     const ownerMember = await channel.guild.members.fetch(tempData.ownerId).catch(() => null);
+    // True only while the owner is actually sitting in the voice channel.
+    // When they leave, the panel swaps "Transfer Ownership" for "Claim Ownership".
+    const ownerPresent = channel.members.has(tempData.ownerId);
 
     // Only treat the panel as gone when Discord says "Unknown Message"
     // (10008). Any other error (rate limit, network blip) used to make the
@@ -193,7 +196,7 @@ async function refreshPanelMessage(channel, tempData) {
       try {
         const fresh = await channel.send({
           embeds: [buildPanelEmbed(ownerMember, tempData)],
-          components: buildPanelComponents(!!ownerMember, !!tempData.locked),
+          components: buildPanelComponents(ownerPresent, !!tempData.locked),
           files: buildPanelAttachments(),
         });
         tempData.panelMessageId = fresh.id;
@@ -206,7 +209,7 @@ async function refreshPanelMessage(channel, tempData) {
 
     await message.edit({
       embeds: [buildPanelEmbed(ownerMember, tempData)],
-      components: buildPanelComponents(!!ownerMember, !!tempData.locked),
+      components: buildPanelComponents(ownerPresent, !!tempData.locked),
       files: buildPanelAttachments(),
     });
   } catch (err) {
@@ -358,6 +361,14 @@ async function handleVoiceStateUpdate(oldState, newState) {
   // Start the empty-channel check first so deleting the channel never waits
   // on a nickname API call.
   if (oldTempData) scheduleEmptyCheck(oldChannelId, guild);
+
+  // Owner left or came back -> flip the Transfer / Claim button on the panel
+  const newTempData = newChannelId ? storage.getTempChannel(newChannelId) : null;
+  for (const [id, data] of [[oldChannelId, oldTempData], [newChannelId, newTempData]]) {
+    if (!data || data.ownerId !== member.id) continue;
+    const ch = guild.channels.cache.get(id);
+    if (ch) refreshPanelMessage(ch, data).catch(() => {});
+  }
 
   if (isCreateTrigger) {
     await createTempChannel(member, guild, config);
