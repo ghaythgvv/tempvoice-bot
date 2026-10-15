@@ -216,6 +216,10 @@ async function handleRenameSubmit(interaction) {
   });
 }
 
+// FIXED: the old label "Max members (0 = no limit, up to 99)" went over
+// Discord's 45-character modal label limit once bold() turned every letter
+// into a 2-unit character, so showModal() threw and the Limit button always
+// failed. The label is short now and the hint moved into the placeholder.
 async function handleLimitOpen(interaction) {
   const { error, tempData } = getOwnedTempChannel(interaction);
   if (error) return interaction.reply({ content: error, ...EPHEMERAL });
@@ -225,7 +229,8 @@ async function handleLimitOpen(interaction) {
   const modal = new ModalBuilder().setCustomId('tempvc:limit-modal').setTitle(bold('Set member limit'));
   const input = new TextInputBuilder()
     .setCustomId('limit')
-    .setLabel(bold('Max members (0 = no limit, up to 99)'))
+    .setLabel(bold('Member limit'))
+    .setPlaceholder('0 = no limit, up to 99')
     .setStyle(TextInputStyle.Short)
     .setMaxLength(2)
     .setRequired(true);
