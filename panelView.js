@@ -38,7 +38,12 @@ const PANEL_COLOR = 0x9b59b6;
 // Banner shown at the bottom of the panel embed. It's the banner.gif from the
 // repo, loaded through GitHub's raw link so it also survives panel edits
 // (no attachment re-upload needed). Set to '' to hide the banner.
-const PANEL_BANNER_URL = 'https://raw.githubusercontent.com/ghaythgvv/tempvoice-bot/main/banner.gif';
+//
+// IMPORTANT: Discord caches embed images by their URL. Every time you replace
+// banner.gif, bump BANNER_VERSION (11 -> 12 -> 13 ...) so Discord sees a new
+// URL and fetches the new image instead of showing the old cached one.
+const BANNER_VERSION = 11;
+const PANEL_BANNER_URL = `https://raw.githubusercontent.com/ghaythgvv/tempvoice-bot/main/banner.gif?v=${BANNER_VERSION}`;
 
 // The panel's custom title emoji + text. Kept as its own constant (rather
 // than inlined in buildPanelEmbed) so it's easy to swap the emoji again
